@@ -1,0 +1,447 @@
+@page "/admin"
+@rendermode InteractiveServer
+
+@using ExpenseTracker.Data
+@using ExpenseTracker.Models
+@using Microsoft.AspNetCore.Identity
+@using Microsoft.EntityFrameworkCore
+
+@inject ApplicationDbContext Db
+@inject UserManager<ApplicationUser> UserManager
+
+<PageTitle>Admin Dashboard</PageTitle>
+
+<div class="ad-container">
+    <div class="ad-header">
+        <h1 class="ad-title">
+            <span class="ad-icon">⚙️</span> Admin Dashboard
+        </h1>
+        <p class="ad-subtitle">Platform-wide overview and statistics</p>
+    </div>
+
+    @if (isLoading)
+    {
+        <div class="ad-loading">
+            <div class="ad-spinner"></div>
+            <p>Loading dashboard data...</p>
+        </div>
+    }
+    else
+    {
+        <!-- Stat Cards -->
+        <div class="ad-stats-grid">
+            <div class="ad-stat-card ad-stat-users">
+                <div class="ad-stat-icon">👥</div>
+                <div class="ad-stat-info">
+                    <span class="ad-stat-value">@totalUsers</span>
+                    <span class="ad-stat-label">Total Users</span>
+                </div>
+            </div>
+            <div class="ad-stat-card ad-stat-expenses">
+                <div class="ad-stat-icon">🧾</div>
+                <div class="ad-stat-info">
+                    <span class="ad-stat-value">@totalExpenses</span>
+                    <span class="ad-stat-label">Total Expenses</span>
+                </div>
+            </div>
+            <div class="ad-stat-card ad-stat-amount">
+                <div class="ad-stat-icon">💰</div>
+                <div class="ad-stat-info">
+                    <span class="ad-stat-value">@totalAmountSpent.ToString("C2")</span>
+                    <span class="ad-stat-label">Total Amount Spent</span>
+                </div>
+            </div>
+            <div class="ad-stat-card ad-stat-categories">
+                <div class="ad-stat-icon">🏷️</div>
+                <div class="ad-stat-info">
+                    <span class="ad-stat-value">@totalCategories</span>
+                    <span class="ad-stat-label">Total Categories</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Quick Links -->
+        <div class="ad-quick-links">
+            <a href="/admin/users" class="ad-quick-btn">👥 Manage Users</a>
+            <a href="/admin/expenses" class="ad-quick-btn">🧾 Manage Expenses</a>
+            <a href="/admin/categories" class="ad-quick-btn">🏷️ Manage Categories</a>
+        </div>
+
+        <div class="ad-tables-row">
+            <!-- Recent Expenses -->
+            <div class="ad-card">
+                <div class="ad-card-header">
+                    <h2 class="ad-card-title">🕒 Recent Expenses</h2>
+                    <a href="/admin/expenses" class="ad-view-all">View All →</a>
+                </div>
+                @if (recentExpenses.Count == 0)
+                {
+                    <p class="ad-empty">No expenses recorded yet.</p>
+                }
+                else
+                {
+                    <div class="ad-table-wrap">
+                        <table class="ad-table">
+                            <thead>
+                                <tr>
+                                    <th>Title</th>
+                                    <th>Amount</th>
+                                    <th>User</th>
+                                    <th>Date</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var item in recentExpenses)
+                                {
+                                    <tr>
+                                        <td>@item.Title</td>
+                                        <td class="ad-amount">@item.Amount.ToString("C2")</td>
+                                        <td class="ad-user-email">@item.UserEmail</td>
+                                        <td>@item.Date.ToString("MMM dd, yyyy")</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+            </div>
+
+            <!-- Top Spending Users -->
+            <div class="ad-card">
+                <div class="ad-card-header">
+                    <h2 class="ad-card-title">🏆 Top Spending Users</h2>
+                    <a href="/admin/users" class="ad-view-all">View All →</a>
+                </div>
+                @if (topUsers.Count == 0)
+                {
+                    <p class="ad-empty">No spending data available.</p>
+                }
+                else
+                {
+                    <div class="ad-table-wrap">
+                        <table class="ad-table">
+                            <thead>
+                                <tr>
+                                    <th>User</th>
+                                    <th>Total Spent</th>
+                                    <th>Expenses</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var (index, user) in topUsers.Select((u, i) => (i + 1, u)))
+                                {
+                                    <tr>
+                                        <td>
+                                            <span class="ad-rank-badge">@index</span>
+                                            @user.Email
+                                        </td>
+                                        <td class="ad-amount">@user.TotalSpent.ToString("C2")</td>
+                                        <td>
+                                            <span class="ad-count-badge">@user.ExpenseCount</span>
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private bool isLoading = true;
+    private int totalUsers;
+    private int totalExpenses;
+    private decimal totalAmountSpent;
+    private int totalCategories;
+
+    private List<RecentExpenseRow> recentExpenses = new();
+    private List<TopUserRow> topUsers = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        var users = await UserManager.Users.ToListAsync();
+        var expenses = await Db.Expenses.ToListAsync();
+        var categories = await Db.Categories.ToListAsync();
+
+        totalUsers = users.Count;
+        totalExpenses = expenses.Count;
+        totalAmountSpent = expenses.Sum(e => e.Amount);
+        totalCategories = categories.Count;
+
+        var userDict = users.ToDictionary(u => u.Id, u => u.Email ?? u.UserName ?? "Unknown");
+
+        recentExpenses = expenses
+            .OrderByDescending(e => e.Date)
+            .Take(10)
+            .Select(e => new RecentExpenseRow
+            {
+                Title = e.Title,
+                Amount = e.Amount,
+                Date = e.Date,
+                UserEmail = userDict.TryGetValue(e.UserId, out var email) ? email : "Unknown"
+            })
+            .ToList();
+
+        topUsers = expenses
+            .GroupBy(e => e.UserId)
+            .Select(g => new TopUserRow
+            {
+                Email = userDict.TryGetValue(g.Key, out var email) ? email : "Unknown",
+                TotalSpent = g.Sum(e => e.Amount),
+                ExpenseCount = g.Count()
+            })
+            .OrderByDescending(u => u.TotalSpent)
+            .Take(5)
+            .ToList();
+
+        isLoading = false;
+    }
+
+    private record RecentExpenseRow
+    {
+        public string Title { get; init; } = string.Empty;
+        public decimal Amount { get; init; }
+        public DateTime Date { get; init; }
+        public string UserEmail { get; init; } = string.Empty;
+    }
+
+    private record TopUserRow
+    {
+        public string Email { get; init; } = string.Empty;
+        public decimal TotalSpent { get; init; }
+        public int ExpenseCount { get; init; }
+    }
+}
+
+<style>
+    .ad-container {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 2rem 1rem;
+        font-family: 'Segoe UI', sans-serif;
+    }
+
+    .ad-header {
+        margin-bottom: 2rem;
+    }
+
+    .ad-title {
+        font-size: 1.8rem;
+        font-weight: 700;
+        color: #052767;
+        margin: 0 0 0.25rem;
+    }
+
+    .ad-icon {
+        margin-right: 0.5rem;
+    }
+
+    .ad-subtitle {
+        color: #6c757d;
+        margin: 0;
+        font-size: 0.95rem;
+    }
+
+    /* Loading */
+    .ad-loading {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: 3rem;
+        color: #6c757d;
+    }
+
+    .ad-spinner {
+        width: 40px;
+        height: 40px;
+        border: 4px solid #e0e7ff;
+        border-top-color: #052767;
+        border-radius: 50%;
+        animation: ad-spin 0.8s linear infinite;
+        margin-bottom: 1rem;
+    }
+
+    @@keyframes ad-spin { to { transform: rotate(360deg); } }
+
+    /* Stats Grid */
+    .ad-stats-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 1.25rem;
+        margin-bottom: 1.5rem;
+    }
+
+    .ad-stat-card {
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        padding: 1.25rem 1.5rem;
+        border-radius: 14px;
+        color: white;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+    }
+
+    .ad-stat-users    { background: linear-gradient(135deg, #052767, #1a4fa0); }
+    .ad-stat-expenses { background: linear-gradient(135deg, #3a0647, #7c3aed); }
+    .ad-stat-amount   { background: linear-gradient(135deg, #065f46, #10b981); }
+    .ad-stat-categories { background: linear-gradient(135deg, #92400e, #f59e0b); }
+
+    .ad-stat-icon {
+        font-size: 2rem;
+        opacity: 0.9;
+    }
+
+    .ad-stat-info {
+        display: flex;
+        flex-direction: column;
+    }
+
+    .ad-stat-value {
+        font-size: 1.6rem;
+        font-weight: 700;
+        line-height: 1.1;
+    }
+
+    .ad-stat-label {
+        font-size: 0.8rem;
+        opacity: 0.85;
+        margin-top: 0.15rem;
+    }
+
+    /* Quick Links */
+    .ad-quick-links {
+        display: flex;
+        gap: 1rem;
+        margin-bottom: 2rem;
+        flex-wrap: wrap;
+    }
+
+    .ad-quick-btn {
+        padding: 0.5rem 1.25rem;
+        background: #052767;
+        color: white;
+        border-radius: 8px;
+        text-decoration: none;
+        font-size: 0.9rem;
+        font-weight: 500;
+        transition: background 0.2s;
+    }
+
+    .ad-quick-btn:hover {
+        background: #1a4fa0;
+        color: white;
+        text-decoration: none;
+    }
+
+    /* Tables row */
+    .ad-tables-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 1.5rem;
+    }
+
+    @@media (max-width: 768px) {
+        .ad-tables-row { grid-template-columns: 1fr; }
+    }
+
+    .ad-card {
+        background: white;
+        border-radius: 14px;
+        box-shadow: 0 2px 12px rgba(5,39,103,0.1);
+        overflow: hidden;
+    }
+
+    .ad-card-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 1rem 1.25rem;
+        border-bottom: 1px solid #e8edf5;
+        background: #f8faff;
+    }
+
+    .ad-card-title {
+        font-size: 1rem;
+        font-weight: 600;
+        color: #052767;
+        margin: 0;
+    }
+
+    .ad-view-all {
+        font-size: 0.8rem;
+        color: #1a4fa0;
+        text-decoration: none;
+    }
+
+    .ad-view-all:hover { text-decoration: underline; }
+
+    .ad-table-wrap { overflow-x: auto; }
+
+    .ad-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.875rem;
+    }
+
+    .ad-table th {
+        background: #f1f5fb;
+        color: #052767;
+        font-weight: 600;
+        padding: 0.6rem 1rem;
+        text-align: left;
+        border-bottom: 1px solid #e0e7f0;
+    }
+
+    .ad-table td {
+        padding: 0.6rem 1rem;
+        border-bottom: 1px solid #f0f4f9;
+        color: #374151;
+    }
+
+    .ad-table tbody tr:hover { background: #f8faff; }
+    .ad-table tbody tr:last-child td { border-bottom: none; }
+
+    .ad-amount {
+        font-weight: 600;
+        color: #065f46;
+    }
+
+    .ad-user-email {
+        font-size: 0.8rem;
+        color: #6c757d;
+    }
+
+    .ad-rank-badge {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 22px;
+        height: 22px;
+        border-radius: 50%;
+        background: #052767;
+        color: white;
+        font-size: 0.7rem;
+        font-weight: 700;
+        margin-right: 0.5rem;
+    }
+
+    .ad-count-badge {
+        display: inline-block;
+        padding: 0.15rem 0.6rem;
+        background: #e0e7ff;
+        color: #052767;
+        border-radius: 12px;
+        font-size: 0.78rem;
+        font-weight: 600;
+    }
+
+    .ad-empty {
+        padding: 2rem;
+        text-align: center;
+        color: #9ca3af;
+        font-style: italic;
+    }
+</style>

@@ -1,0 +1,536 @@
+@page "/admin/expenses"
+@rendermode InteractiveServer
+
+@using ExpenseTracker.Data
+@using ExpenseTracker.Models
+@using Microsoft.AspNetCore.Identity
+@using Microsoft.EntityFrameworkCore
+
+@inject ApplicationDbContext Db
+@inject UserManager<ApplicationUser> UserManager
+
+<PageTitle>Admin - Expenses</PageTitle>
+
+<div class="ae-container">
+    <div class="ae-header">
+        <div>
+            <h1 class="ae-title">🧾 Expense Management</h1>
+            <p class="ae-subtitle">View, filter, and manage all expenses across the platform</p>
+        </div>
+        <a href="/admin" class="ae-back-btn">← Back to Dashboard</a>
+    </div>
+
+    <!-- Summary Bar -->
+    <div class="ae-summary-bar">
+        <div class="ae-summary-item">
+            <span class="ae-summary-value ae-val-blue">@filteredExpenses.Count</span>
+            <span class="ae-summary-label">Filtered Results</span>
+        </div>
+        <div class="ae-summary-item">
+            <span class="ae-summary-value ae-val-green">@filteredExpenses.Sum(e => e.Amount).ToString("C2")</span>
+            <span class="ae-summary-label">Filtered Total</span>
+        </div>
+        <div class="ae-summary-item">
+            <span class="ae-summary-value ae-val-grey">@allExpenses.Count</span>
+            <span class="ae-summary-label">All Expenses</span>
+        </div>
+    </div>
+
+    <!-- Filter Bar -->
+    <div class="ae-filter-bar">
+        <input class="ae-input"
+               value="@searchTitle"
+               @oninput="OnTitleSearch"
+               placeholder="🔍 Search by title..." />
+
+        <select class="ae-select" @bind="selectedCategoryId" @bind:after="FilterExpenses">
+            <option value="0">All Categories</option>
+            @foreach (var cat in categoriesDict.Values)
+            {
+                <option value="@cat.Id">@(cat.Icon != null ? cat.Icon + " " : "")@cat.Name</option>
+            }
+        </select>
+
+        <div class="ae-date-group">
+            <label>From</label>
+            <input type="date" class="ae-input ae-date-input" @bind="fromDate" @bind:after="FilterExpenses" />
+        </div>
+
+        <div class="ae-date-group">
+            <label>To</label>
+            <input type="date" class="ae-input ae-date-input" @bind="toDate" @bind:after="FilterExpenses" />
+        </div>
+
+        <button class="ae-clear-btn" @onclick="ClearFilters">✕ Clear</button>
+    </div>
+
+    @if (isLoading)
+    {
+        <div class="ae-loading">
+            <div class="ae-spinner"></div>
+            <p>Loading expenses...</p>
+        </div>
+    }
+    else if (allExpenses.Count == 0)
+    {
+        <div class="ae-empty-state">
+            <p>🧾 No expenses recorded yet.</p>
+        </div>
+    }
+    else if (pagedExpenses.Count == 0)
+    {
+        <div class="ae-empty-state">
+            <p>No expenses match your filters. <button class="ae-link-btn" @onclick="ClearFilters">Clear filters</button></p>
+        </div>
+    }
+    else
+    {
+        <div class="ae-card">
+            <div class="ae-table-wrap">
+                <table class="ae-table">
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>Title</th>
+                            <th>Amount</th>
+                            <th>Category</th>
+                            <th>User</th>
+                            <th>Date</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var (expense, localIndex) in pagedExpenses.Select((e, i) => (e, i)))
+                        {
+                            var globalIndex = (currentPage - 1) * PageSize + localIndex + 1;
+                            var catName = expense.CategoryId.HasValue && categoriesDict.TryGetValue(expense.CategoryId.Value, out var cat)
+                                          ? (cat.Icon != null ? cat.Icon + " " + cat.Name : cat.Name)
+                                          : "Uncategorized";
+                            var userEmail = usersDict.TryGetValue(expense.UserId, out var email) ? email : "Unknown";
+
+                            <tr class="@(confirmDeleteId == expense.Id ? "ae-row-confirm" : "")">
+                                <td class="ae-row-num">@globalIndex</td>
+                                <td class="ae-title-cell">@expense.Title</td>
+                                <td class="ae-amount">@expense.Amount.ToString("C2")</td>
+                                <td><span class="ae-cat-badge">@catName</span></td>
+                                <td class="ae-email">@userEmail</td>
+                                <td>@expense.Date.ToString("MMM dd, yyyy")</td>
+                                <td>
+                                    @if (confirmDeleteId == expense.Id)
+                                    {
+                                        <div class="ae-confirm-btns">
+                                            <span class="ae-confirm-text">Delete?</span>
+                                            <button class="ae-btn-yes" @onclick="() => ConfirmDelete(expense.Id)">✓ Yes</button>
+                                            <button class="ae-btn-no" @onclick="CancelDelete">✕ No</button>
+                                        </div>
+                                    }
+                                    else
+                                    {
+                                        <button class="ae-delete-btn" @onclick="() => RequestDelete(expense.Id)">🗑 Delete</button>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Pagination -->
+            <div class="ae-pagination">
+                <button class="ae-page-btn" disabled="@(currentPage <= 1)" @onclick="PrevPage">‹ Prev</button>
+                <span class="ae-page-info">Page @currentPage of @totalPages</span>
+                <button class="ae-page-btn" disabled="@(currentPage >= totalPages)" @onclick="NextPage">Next ›</button>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private const int PageSize = 15;
+
+    private bool isLoading = true;
+    private string searchTitle = string.Empty;
+    private int selectedCategoryId = 0;
+    private DateTime? fromDate;
+    private DateTime? toDate;
+    private int confirmDeleteId = 0;
+    private int currentPage = 1;
+    private int totalPages = 1;
+
+    private List<Expense> allExpenses = new();
+    private List<Expense> filteredExpenses = new();
+    private List<Expense> pagedExpenses = new();
+    private Dictionary<int, Category> categoriesDict = new();
+    private Dictionary<string, string> usersDict = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        allExpenses = await Db.Expenses.OrderByDescending(e => e.Date).ToListAsync();
+        categoriesDict = await Db.Categories.ToDictionaryAsync(c => c.Id);
+        var users = await UserManager.Users.ToListAsync();
+        usersDict = users.ToDictionary(u => u.Id, u => u.Email ?? u.UserName ?? "Unknown");
+
+        filteredExpenses = allExpenses.ToList();
+        UpdatePaging();
+        isLoading = false;
+    }
+
+    private void OnTitleSearch(ChangeEventArgs e)
+    {
+        searchTitle = e.Value?.ToString() ?? string.Empty;
+        FilterExpenses();
+    }
+
+    private void FilterExpenses()
+    {
+        filteredExpenses = allExpenses.Where(e =>
+        {
+            if (!string.IsNullOrWhiteSpace(searchTitle) &&
+                !e.Title.Contains(searchTitle, StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            if (selectedCategoryId != 0 && e.CategoryId != selectedCategoryId)
+                return false;
+
+            if (fromDate.HasValue && e.Date.Date < fromDate.Value.Date)
+                return false;
+
+            if (toDate.HasValue && e.Date.Date > toDate.Value.Date)
+                return false;
+
+            return true;
+        }).ToList();
+
+        currentPage = 1;
+        confirmDeleteId = 0;
+        UpdatePaging();
+    }
+
+    private void UpdatePaging()
+    {
+        totalPages = (int)Math.Ceiling(filteredExpenses.Count / (double)PageSize);
+        if (totalPages == 0) totalPages = 1;
+        pagedExpenses = filteredExpenses.Skip((currentPage - 1) * PageSize).Take(PageSize).ToList();
+    }
+
+    private void PrevPage()
+    {
+        if (currentPage > 1) { currentPage--; UpdatePaging(); }
+    }
+
+    private void NextPage()
+    {
+        if (currentPage < totalPages) { currentPage++; UpdatePaging(); }
+    }
+
+    private void ClearFilters()
+    {
+        searchTitle = string.Empty;
+        selectedCategoryId = 0;
+        fromDate = null;
+        toDate = null;
+        FilterExpenses();
+    }
+
+    private void RequestDelete(int id) => confirmDeleteId = id;
+    private void CancelDelete() => confirmDeleteId = 0;
+
+    private async Task ConfirmDelete(int id)
+    {
+        var expense = allExpenses.FirstOrDefault(e => e.Id == id);
+        if (expense != null)
+        {
+            Db.Expenses.Remove(expense);
+            await Db.SaveChangesAsync();
+            allExpenses.Remove(expense);
+        }
+        confirmDeleteId = 0;
+        FilterExpenses();
+    }
+}
+
+<style>
+    .ae-container {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 2rem 1rem;
+        font-family: 'Segoe UI', sans-serif;
+    }
+
+    .ae-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        margin-bottom: 1.25rem;
+        flex-wrap: wrap;
+        gap: 1rem;
+    }
+
+    .ae-title {
+        font-size: 1.8rem;
+        font-weight: 700;
+        color: #052767;
+        margin: 0 0 0.25rem;
+    }
+
+    .ae-subtitle { color: #6c757d; margin: 0; font-size: 0.95rem; }
+
+    .ae-back-btn {
+        padding: 0.45rem 1rem;
+        background: #f1f5fb;
+        color: #052767;
+        border-radius: 8px;
+        text-decoration: none;
+        font-size: 0.85rem;
+        font-weight: 500;
+        border: 1px solid #d0daea;
+    }
+
+    .ae-back-btn:hover { background: #e0e7f0; text-decoration: none; }
+
+    /* Summary Bar */
+    .ae-summary-bar {
+        display: flex;
+        gap: 1rem;
+        margin-bottom: 1.25rem;
+        flex-wrap: wrap;
+    }
+
+    .ae-summary-item {
+        background: white;
+        border-radius: 10px;
+        padding: 0.75rem 1.25rem;
+        box-shadow: 0 2px 8px rgba(5,39,103,0.08);
+        display: flex;
+        flex-direction: column;
+        gap: 0.1rem;
+        min-width: 140px;
+    }
+
+    .ae-summary-value { font-size: 1.3rem; font-weight: 700; }
+    .ae-val-blue { color: #052767; }
+    .ae-val-green { color: #065f46; }
+    .ae-val-grey { color: #6c757d; }
+    .ae-summary-label { font-size: 0.75rem; color: #9ca3af; }
+
+    /* Filter Bar */
+    .ae-filter-bar {
+        display: flex;
+        gap: 0.75rem;
+        align-items: center;
+        flex-wrap: wrap;
+        background: white;
+        padding: 1rem;
+        border-radius: 10px;
+        box-shadow: 0 2px 8px rgba(5,39,103,0.08);
+        margin-bottom: 1.25rem;
+    }
+
+    .ae-input {
+        padding: 0.5rem 0.85rem;
+        border: 1px solid #d0daea;
+        border-radius: 7px;
+        font-size: 0.875rem;
+        outline: none;
+    }
+
+    .ae-input:focus { border-color: #052767; box-shadow: 0 0 0 2px rgba(5,39,103,0.1); }
+
+    .ae-search-input-wide { min-width: 220px; }
+
+    .ae-select {
+        padding: 0.5rem 0.85rem;
+        border: 1px solid #d0daea;
+        border-radius: 7px;
+        font-size: 0.875rem;
+        background: white;
+        outline: none;
+    }
+
+    .ae-date-input { width: 140px; }
+
+    .ae-date-group {
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+        font-size: 0.8rem;
+        color: #6c757d;
+    }
+
+    .ae-clear-btn {
+        padding: 0.5rem 1rem;
+        background: #f3f4f6;
+        border: 1px solid #d1d5db;
+        border-radius: 7px;
+        font-size: 0.85rem;
+        cursor: pointer;
+        color: #374151;
+    }
+
+    .ae-clear-btn:hover { background: #e5e7eb; }
+
+    /* Loading */
+    .ae-loading {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: 3rem;
+        color: #6c757d;
+    }
+
+    .ae-spinner {
+        width: 40px;
+        height: 40px;
+        border: 4px solid #e0e7ff;
+        border-top-color: #052767;
+        border-radius: 50%;
+        animation: ae-spin 0.8s linear infinite;
+        margin-bottom: 1rem;
+    }
+
+    @@keyframes ae-spin { to { transform: rotate(360deg); } }
+
+    /* Empty states */
+    .ae-empty-state {
+        background: white;
+        border-radius: 12px;
+        padding: 3rem;
+        text-align: center;
+        color: #9ca3af;
+        font-style: italic;
+        box-shadow: 0 2px 8px rgba(5,39,103,0.08);
+    }
+
+    .ae-link-btn {
+        background: none;
+        border: none;
+        color: #052767;
+        cursor: pointer;
+        text-decoration: underline;
+        font-size: inherit;
+    }
+
+    /* Card + Table */
+    .ae-card {
+        background: white;
+        border-radius: 14px;
+        box-shadow: 0 2px 12px rgba(5,39,103,0.1);
+        overflow: hidden;
+    }
+
+    .ae-table-wrap { overflow-x: auto; }
+
+    .ae-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.875rem;
+    }
+
+    .ae-table th {
+        background: #f1f5fb;
+        color: #052767;
+        font-weight: 600;
+        padding: 0.75rem 1rem;
+        text-align: left;
+        border-bottom: 2px solid #d0daea;
+        white-space: nowrap;
+    }
+
+    .ae-table td {
+        padding: 0.65rem 1rem;
+        border-bottom: 1px solid #f0f4f9;
+        color: #374151;
+        vertical-align: middle;
+    }
+
+    .ae-table tbody tr:hover { background: #f8faff; }
+    .ae-table tbody tr:last-child td { border-bottom: none; }
+
+    .ae-row-confirm { background: #fff7ed !important; }
+    .ae-row-confirm td { border-left: 3px solid #f59e0b; }
+
+    .ae-row-num { color: #9ca3af; font-size: 0.78rem; }
+    .ae-title-cell { font-weight: 500; }
+    .ae-amount { font-weight: 700; color: #065f46; }
+    .ae-email { color: #6c757d; font-size: 0.82rem; }
+
+    .ae-cat-badge {
+        padding: 0.15rem 0.6rem;
+        background: #e0e7ff;
+        color: #3730a3;
+        border-radius: 10px;
+        font-size: 0.78rem;
+        white-space: nowrap;
+    }
+
+    /* Action buttons */
+    .ae-delete-btn {
+        padding: 0.3rem 0.75rem;
+        background: #fee2e2;
+        color: #dc2626;
+        border: none;
+        border-radius: 6px;
+        font-size: 0.8rem;
+        cursor: pointer;
+    }
+
+    .ae-delete-btn:hover { background: #fecaca; }
+
+    .ae-confirm-btns {
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+        white-space: nowrap;
+    }
+
+    .ae-confirm-text { font-size: 0.78rem; color: #92400e; font-weight: 600; }
+
+    .ae-btn-yes {
+        padding: 0.25rem 0.6rem;
+        background: #dc2626;
+        color: white;
+        border: none;
+        border-radius: 5px;
+        font-size: 0.78rem;
+        cursor: pointer;
+    }
+
+    .ae-btn-yes:hover { background: #b91c1c; }
+
+    .ae-btn-no {
+        padding: 0.25rem 0.6rem;
+        background: #e5e7eb;
+        color: #374151;
+        border: none;
+        border-radius: 5px;
+        font-size: 0.78rem;
+        cursor: pointer;
+    }
+
+    .ae-btn-no:hover { background: #d1d5db; }
+
+    /* Pagination */
+    .ae-pagination {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 1rem;
+        padding: 0.9rem 1rem;
+        border-top: 1px solid #f0f4f9;
+    }
+
+    .ae-page-btn {
+        padding: 0.4rem 0.9rem;
+        background: #052767;
+        color: white;
+        border: none;
+        border-radius: 6px;
+        font-size: 0.85rem;
+        cursor: pointer;
+    }
+
+    .ae-page-btn:disabled { background: #d0daea; cursor: default; color: #9ca3af; }
+    .ae-page-btn:not(:disabled):hover { background: #1a4fa0; }
+
+    .ae-page-info { font-size: 0.85rem; color: #6c757d; }
+</style>

@@ -1,0 +1,634 @@
+@page "/admin/categories"
+@rendermode InteractiveServer
+
+@using ExpenseTracker.Data
+@using ExpenseTracker.Models
+@using Microsoft.EntityFrameworkCore
+
+@inject ApplicationDbContext Db
+
+<PageTitle>Admin - Categories</PageTitle>
+
+<div class="ac-container">
+    <div class="ac-header">
+        <div>
+            <h1 class="ac-title">🏷️ Category Management</h1>
+            <p class="ac-subtitle">Add, edit, and delete expense categories</p>
+        </div>
+        <a href="/admin" class="ac-back-btn">← Back to Dashboard</a>
+    </div>
+
+    <!-- Add Category Form -->
+    <div class="ac-add-card">
+        <h2 class="ac-add-title">➕ Add New Category</h2>
+        <div class="ac-add-form">
+            <div class="ac-form-group">
+                <label class="ac-label">Name <span class="ac-required">*</span></label>
+                <input class="ac-input @(showNameError ? "ac-input-error" : "")"
+                       @bind="newCategoryName"
+                       @bind:event="oninput"
+                       maxlength="100"
+                       placeholder="e.g. Food & Dining" />
+                @if (showNameError)
+                {
+                    <span class="ac-error-text">Category name is required.</span>
+                }
+            </div>
+            <div class="ac-form-group">
+                <label class="ac-label">Icon <span class="ac-optional">(optional)</span></label>
+                <input class="ac-input"
+                       @bind="newCategoryIcon"
+                       @bind:event="oninput"
+                       placeholder="e.g. 🍔 or bi-cart" />
+            </div>
+            <button class="ac-add-btn" @onclick="AddCategory" disabled="@isSaving">
+                @if (isSaving)
+                {
+                    <span class="ac-btn-spinner"></span>
+                }
+                else
+                {
+                    <span>✅ Add Category</span>
+                }
+            </button>
+        </div>
+        @if (showSuccessBanner)
+        {
+            <div class="ac-success-banner">✅ Category added successfully!</div>
+        }
+        @if (!string.IsNullOrEmpty(addErrorMessage))
+        {
+            <div class="ac-error-banner">❌ @addErrorMessage</div>
+        }
+    </div>
+
+    @if (isLoading)
+    {
+        <div class="ac-loading">
+            <div class="ac-spinner"></div>
+            <p>Loading categories...</p>
+        </div>
+    }
+    else if (categories.Count == 0)
+    {
+        <div class="ac-empty-state">
+            <p>🏷️ No categories yet. Add your first one above!</p>
+        </div>
+    }
+    else
+    {
+        <div class="ac-card">
+            <div class="ac-table-wrap">
+                <table class="ac-table">
+                    <thead>
+                        <tr>
+                            <th>Icon</th>
+                            <th>Name</th>
+                            <th>Expenses</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var cat in categories)
+                        {
+                            <tr class="@GetRowClass(cat.Id)">
+                                <td class="ac-icon-cell">
+                                    @if (editingId == cat.Id)
+                                    {
+                                        <input class="ac-inline-input ac-icon-input"
+                                               @bind="editIcon"
+                                               placeholder="emoji or class" />
+                                    }
+                                    else
+                                    {
+                                        <span class="ac-icon-display">@(cat.Icon ?? "—")</span>
+                                    }
+                                </td>
+                                <td class="ac-name-cell">
+                                    @if (editingId == cat.Id)
+                                    {
+                                        <input class="ac-inline-input"
+                                               @bind="editName"
+                                               maxlength="100"
+                                               placeholder="Category name" />
+                                    }
+                                    else
+                                    {
+                                        <span>@cat.Name</span>
+                                    }
+                                </td>
+                                <td>
+                                    @{
+                                        var count = expenseCounts.TryGetValue(cat.Id, out var c) ? c : 0;
+                                    }
+                                    @if (count > 0)
+                                    {
+                                        <span class="ac-badge ac-badge-blue">@count</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="ac-badge ac-badge-grey">0</span>
+                                    }
+                                </td>
+                                <td>
+                                    @if (editingId == cat.Id)
+                                    {
+                                        <!-- Edit mode actions -->
+                                        <div class="ac-action-btns">
+                                            <button class="ac-save-btn" @onclick="() => SaveEdit(cat.Id)">💾 Save</button>
+                                            <button class="ac-cancel-btn" @onclick="CancelEdit">✖ Cancel</button>
+                                        </div>
+                                    }
+                                    else if (deleteConfirmId == cat.Id)
+                                    {
+                                        <!-- Delete confirm mode -->
+                                        <div class="ac-action-btns">
+                                            <span class="ac-confirm-text">Delete?</span>
+                                            <button class="ac-confirm-delete-btn" @onclick="() => ConfirmDelete(cat.Id)">🗑️ Yes</button>
+                                            <button class="ac-cancel-btn" @onclick="CancelDelete">✖ Cancel</button>
+                                        </div>
+                                    }
+                                    else
+                                    {
+                                        <!-- Normal mode -->
+                                        <div class="ac-action-btns">
+                                            <button class="ac-edit-btn" @onclick="() => StartEdit(cat)">✏️ Edit</button>
+                                            <button class="ac-delete-btn" @onclick="() => RequestDelete(cat.Id)">🗑 Delete</button>
+                                        </div>
+                                    }
+                                    @if (deleteErrorId == cat.Id && !string.IsNullOrEmpty(deleteErrorMessage))
+                                    {
+                                        <div class="ac-delete-error">@deleteErrorMessage</div>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private bool isLoading = true;
+    private bool isSaving = false;
+    private bool showSuccessBanner = false;
+    private bool showNameError = false;
+
+    private string newCategoryName = string.Empty;
+    private string newCategoryIcon = string.Empty;
+    private string addErrorMessage = string.Empty;
+
+    private int editingId = 0;
+    private string editName = string.Empty;
+    private string editIcon = string.Empty;
+
+    private int deleteConfirmId = 0;
+    private int deleteErrorId = 0;
+    private string deleteErrorMessage = string.Empty;
+
+    private List<Category> categories = new();
+    private Dictionary<int, int> expenseCounts = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadDataAsync();
+    }
+
+    private async Task LoadDataAsync()
+    {
+        isLoading = true;
+        categories = await Db.Categories.OrderBy(c => c.Name).ToListAsync();
+        expenseCounts = await Db.Expenses
+            .Where(e => e.CategoryId.HasValue)
+            .GroupBy(e => e.CategoryId!.Value)
+            .Select(g => new { Id = g.Key, Count = g.Count() })
+            .ToDictionaryAsync(x => x.Id, x => x.Count);
+        isLoading = false;
+    }
+
+    private async Task AddCategory()
+    {
+        showNameError = false;
+        addErrorMessage = string.Empty;
+
+        if (string.IsNullOrWhiteSpace(newCategoryName))
+        {
+            showNameError = true;
+            return;
+        }
+
+        isSaving = true;
+        try
+        {
+            var cat = new Category
+            {
+                Name = newCategoryName.Trim(),
+                Icon = string.IsNullOrWhiteSpace(newCategoryIcon) ? null : newCategoryIcon.Trim()
+            };
+            Db.Categories.Add(cat);
+            await Db.SaveChangesAsync();
+
+            newCategoryName = string.Empty;
+            newCategoryIcon = string.Empty;
+
+            showSuccessBanner = true;
+            await LoadDataAsync();
+
+            _ = Task.Delay(3000).ContinueWith(_ => InvokeAsync(() =>
+            {
+                showSuccessBanner = false;
+                StateHasChanged();
+            }));
+        }
+        catch (Exception ex)
+        {
+            addErrorMessage = $"Failed to add category: {ex.Message}";
+        }
+        finally
+        {
+            isSaving = false;
+        }
+    }
+
+    private void StartEdit(Category cat)
+    {
+        deleteConfirmId = 0;
+        deleteErrorId = 0;
+        editingId = cat.Id;
+        editName = cat.Name;
+        editIcon = cat.Icon ?? string.Empty;
+    }
+
+    private void CancelEdit()
+    {
+        editingId = 0;
+        editName = string.Empty;
+        editIcon = string.Empty;
+    }
+
+    private async Task SaveEdit(int id)
+    {
+        if (string.IsNullOrWhiteSpace(editName)) return;
+
+        var cat = await Db.Categories.FindAsync(id);
+        if (cat != null)
+        {
+            cat.Name = editName.Trim();
+            cat.Icon = string.IsNullOrWhiteSpace(editIcon) ? null : editIcon.Trim();
+            await Db.SaveChangesAsync();
+        }
+
+        CancelEdit();
+        await LoadDataAsync();
+    }
+
+    private void RequestDelete(int id)
+    {
+        editingId = 0;
+        deleteErrorId = 0;
+        deleteErrorMessage = string.Empty;
+        deleteConfirmId = id;
+    }
+
+    private void CancelDelete()
+    {
+        deleteConfirmId = 0;
+        deleteErrorId = 0;
+        deleteErrorMessage = string.Empty;
+    }
+
+    private async Task ConfirmDelete(int id)
+    {
+        var count = expenseCounts.TryGetValue(id, out var c) ? c : 0;
+        if (count > 0)
+        {
+            deleteErrorId = id;
+            deleteErrorMessage = $"Cannot delete: category has {count} expense{(count == 1 ? "" : "s")}.";
+            deleteConfirmId = 0;
+            return;
+        }
+
+        var cat = await Db.Categories.FindAsync(id);
+        if (cat != null)
+        {
+            Db.Categories.Remove(cat);
+            await Db.SaveChangesAsync();
+        }
+
+        deleteConfirmId = 0;
+        deleteErrorId = 0;
+        deleteErrorMessage = string.Empty;
+        await LoadDataAsync();
+    }
+
+    private string GetRowClass(int id)
+    {
+        if (editingId == id) return "ac-row-editing";
+        if (deleteConfirmId == id) return "ac-row-deleting";
+        return string.Empty;
+    }
+}
+
+<style>
+    .ac-container {
+        max-width: 900px;
+        margin: 0 auto;
+        padding: 2rem 1rem;
+        font-family: 'Segoe UI', sans-serif;
+    }
+
+    .ac-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        margin-bottom: 1.5rem;
+        flex-wrap: wrap;
+        gap: 1rem;
+    }
+
+    .ac-title {
+        font-size: 1.8rem;
+        font-weight: 700;
+        color: #052767;
+        margin: 0 0 0.25rem;
+    }
+
+    .ac-subtitle { color: #6c757d; margin: 0; font-size: 0.95rem; }
+
+    .ac-back-btn {
+        padding: 0.45rem 1rem;
+        background: #f1f5fb;
+        color: #052767;
+        border-radius: 8px;
+        text-decoration: none;
+        font-size: 0.85rem;
+        font-weight: 500;
+        border: 1px solid #d0daea;
+    }
+
+    .ac-back-btn:hover { background: #e0e7f0; text-decoration: none; }
+
+    /* Add card */
+    .ac-add-card {
+        background: white;
+        border-radius: 14px;
+        box-shadow: 0 2px 12px rgba(5,39,103,0.1);
+        padding: 1.5rem;
+        margin-bottom: 1.5rem;
+    }
+
+    .ac-add-title {
+        font-size: 1rem;
+        font-weight: 600;
+        color: #052767;
+        margin: 0 0 1rem;
+    }
+
+    .ac-add-form {
+        display: flex;
+        align-items: flex-end;
+        gap: 0.75rem;
+        flex-wrap: wrap;
+    }
+
+    .ac-form-group {
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+    }
+
+    .ac-label { font-size: 0.8rem; font-weight: 600; color: #374151; }
+    .ac-required { color: #dc2626; }
+    .ac-optional { color: #9ca3af; font-weight: 400; }
+
+    .ac-input {
+        padding: 0.5rem 0.85rem;
+        border: 1px solid #d0daea;
+        border-radius: 7px;
+        font-size: 0.875rem;
+        outline: none;
+    }
+
+    .ac-input:focus { border-color: #052767; box-shadow: 0 0 0 2px rgba(5,39,103,0.1); }
+    .ac-input-error { border-color: #dc2626; }
+    .ac-error-text { font-size: 0.75rem; color: #dc2626; }
+
+    .ac-add-btn {
+        padding: 0.55rem 1.25rem;
+        background: linear-gradient(135deg, #059669, #10b981);
+        color: white;
+        border: none;
+        border-radius: 8px;
+        font-size: 0.875rem;
+        font-weight: 600;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+    }
+
+    .ac-add-btn:hover { background: linear-gradient(135deg, #047857, #059669); }
+    .ac-add-btn:disabled { opacity: 0.7; cursor: default; }
+
+    .ac-btn-spinner {
+        width: 16px;
+        height: 16px;
+        border: 2px solid rgba(255,255,255,0.4);
+        border-top-color: white;
+        border-radius: 50%;
+        animation: ac-spin 0.7s linear infinite;
+    }
+
+    @@keyframes ac-spin { to { transform: rotate(360deg); } }
+
+    .ac-success-banner {
+        margin-top: 0.75rem;
+        padding: 0.6rem 1rem;
+        background: #d1fae5;
+        color: #065f46;
+        border-radius: 8px;
+        font-size: 0.875rem;
+        font-weight: 500;
+    }
+
+    .ac-error-banner {
+        margin-top: 0.75rem;
+        padding: 0.6rem 1rem;
+        background: #fee2e2;
+        color: #dc2626;
+        border-radius: 8px;
+        font-size: 0.875rem;
+    }
+
+    /* Loading */
+    .ac-loading {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: 3rem;
+        color: #6c757d;
+    }
+
+    .ac-spinner {
+        width: 40px;
+        height: 40px;
+        border: 4px solid #e0e7ff;
+        border-top-color: #052767;
+        border-radius: 50%;
+        animation: ac-spin 0.8s linear infinite;
+        margin-bottom: 1rem;
+    }
+
+    .ac-empty-state {
+        background: white;
+        border-radius: 12px;
+        padding: 3rem;
+        text-align: center;
+        color: #9ca3af;
+        font-style: italic;
+        box-shadow: 0 2px 8px rgba(5,39,103,0.08);
+    }
+
+    /* Table card */
+    .ac-card {
+        background: white;
+        border-radius: 14px;
+        box-shadow: 0 2px 12px rgba(5,39,103,0.1);
+        overflow: hidden;
+    }
+
+    .ac-table-wrap { overflow-x: auto; }
+
+    .ac-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.875rem;
+    }
+
+    .ac-table th {
+        background: #f1f5fb;
+        color: #052767;
+        font-weight: 600;
+        padding: 0.75rem 1rem;
+        text-align: left;
+        border-bottom: 2px solid #d0daea;
+    }
+
+    .ac-table td {
+        padding: 0.7rem 1rem;
+        border-bottom: 1px solid #f0f4f9;
+        color: #374151;
+        vertical-align: middle;
+    }
+
+    .ac-table tbody tr:hover { background: #f8faff; }
+    .ac-table tbody tr:last-child td { border-bottom: none; }
+
+    .ac-row-editing { background: #fffbeb !important; border-left: 3px solid #f59e0b; }
+    .ac-row-deleting { background: #fff5f5 !important; border-left: 3px solid #dc2626; }
+
+    .ac-icon-cell { width: 80px; font-size: 1.2rem; }
+    .ac-icon-display { font-size: 1.2rem; }
+    .ac-name-cell { font-weight: 500; }
+
+    .ac-inline-input {
+        padding: 0.35rem 0.6rem;
+        border: 1px solid #d0daea;
+        border-radius: 6px;
+        font-size: 0.875rem;
+        outline: none;
+        width: 100%;
+    }
+
+    .ac-inline-input:focus { border-color: #052767; }
+    .ac-icon-input { width: 80px; }
+
+    .ac-badge {
+        display: inline-block;
+        padding: 0.2rem 0.65rem;
+        border-radius: 12px;
+        font-size: 0.78rem;
+        font-weight: 600;
+    }
+
+    .ac-badge-blue { background: #dbeafe; color: #1d4ed8; }
+    .ac-badge-grey { background: #f3f4f6; color: #9ca3af; }
+
+    .ac-action-btns {
+        display: flex;
+        gap: 0.4rem;
+        align-items: center;
+        flex-wrap: wrap;
+    }
+
+    .ac-edit-btn {
+        padding: 0.3rem 0.7rem;
+        background: #dbeafe;
+        color: #1d4ed8;
+        border: none;
+        border-radius: 6px;
+        font-size: 0.8rem;
+        cursor: pointer;
+    }
+
+    .ac-edit-btn:hover { background: #bfdbfe; }
+
+    .ac-delete-btn {
+        padding: 0.3rem 0.7rem;
+        background: #fee2e2;
+        color: #dc2626;
+        border: none;
+        border-radius: 6px;
+        font-size: 0.8rem;
+        cursor: pointer;
+    }
+
+    .ac-delete-btn:hover { background: #fecaca; }
+
+    .ac-save-btn {
+        padding: 0.3rem 0.7rem;
+        background: #059669;
+        color: white;
+        border: none;
+        border-radius: 6px;
+        font-size: 0.8rem;
+        cursor: pointer;
+    }
+
+    .ac-save-btn:hover { background: #047857; }
+
+    .ac-cancel-btn {
+        padding: 0.3rem 0.7rem;
+        background: #e5e7eb;
+        color: #374151;
+        border: none;
+        border-radius: 6px;
+        font-size: 0.8rem;
+        cursor: pointer;
+    }
+
+    .ac-cancel-btn:hover { background: #d1d5db; }
+
+    .ac-confirm-text { font-size: 0.78rem; color: #dc2626; font-weight: 600; }
+
+    .ac-confirm-delete-btn {
+        padding: 0.3rem 0.7rem;
+        background: #dc2626;
+        color: white;
+        border: none;
+        border-radius: 6px;
+        font-size: 0.8rem;
+        cursor: pointer;
+    }
+
+    .ac-confirm-delete-btn:hover { background: #b91c1c; }
+
+    .ac-delete-error {
+        margin-top: 0.3rem;
+        font-size: 0.75rem;
+        color: #dc2626;
+        font-style: italic;
+    }
+</style>
