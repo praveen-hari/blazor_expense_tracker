@@ -1,0 +1,897 @@
+@page "/admin/expenses"
+@rendermode InteractiveServer
+
+@using ExpenseTracker.Data
+@using ExpenseTracker.Models
+@using Microsoft.AspNetCore.Identity
+@using Microsoft.EntityFrameworkCore
+
+@inject ApplicationDbContext Db
+@inject UserManager<ApplicationUser> UserManager
+
+<PageTitle>Admin - Expenses</PageTitle>
+
+<div class="admin-expenses-container">
+
+    <!-- ───────────────────────── Page Header ───────────────────────── -->
+    <div class="page-header">
+        <div class="page-header-left">
+            <h1 class="page-title">
+                <span class="page-title-icon">💸</span>
+                Expenses Management
+            </h1>
+            <p class="page-subtitle">View, filter, and manage all user expenses</p>
+        </div>
+        <div class="summary-badges">
+            <div class="summary-badge">
+                <span class="badge-value">@filteredExpenses.Count</span>
+                <span class="badge-label">Filtered Expenses</span>
+            </div>
+            <div class="summary-badge summary-badge-accent">
+                <span class="badge-value">@filteredExpenses.Sum(e => e.Amount).ToString("C")</span>
+                <span class="badge-label">Total Amount</span>
+            </div>
+            <div class="summary-badge summary-badge-muted">
+                <span class="badge-value">@allExpenses.Count</span>
+                <span class="badge-label">All Expenses</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- ───────────────────────── Filter Bar ────────────────────────── -->
+    <div class="filter-card">
+        <div class="filter-grid">
+
+            <div class="filter-group">
+                <label class="filter-label">🔍 Search by Title</label>
+                <input class="filter-input"
+                       type="text"
+                       placeholder="Search expenses..."
+                       @bind="searchText"
+                       @bind:event="oninput"
+                       @oninput="OnFilterChanged" />
+            </div>
+
+            <div class="filter-group">
+                <label class="filter-label">🏷️ Category</label>
+                <select class="filter-input" @bind="selectedCategoryId" @bind:after="FilterExpenses">
+                    <option value="0">All Categories</option>
+                    @foreach (var cat in categoriesDict.Values)
+                    {
+                        <option value="@cat.Id">@(cat.Icon != null ? cat.Icon + " " : "")@cat.Name</option>
+                    }
+                </select>
+            </div>
+
+            <div class="filter-group">
+                <label class="filter-label">📅 From Date</label>
+                <input class="filter-input"
+                       type="date"
+                       @bind="fromDate"
+                       @bind:after="FilterExpenses" />
+            </div>
+
+            <div class="filter-group">
+                <label class="filter-label">📅 To Date</label>
+                <input class="filter-input"
+                       type="date"
+                       @bind="toDate"
+                       @bind:after="FilterExpenses" />
+            </div>
+
+        </div>
+
+        <div class="filter-actions">
+            <button class="btn-clear" @onclick="ClearFilters">
+                ✕ Clear Filters
+            </button>
+        </div>
+    </div>
+
+    <!-- ───────────────────────── Expenses Table ────────────────────── -->
+    @if (isLoading)
+    {
+        <div class="loading-state">
+            <div class="spinner"></div>
+            <p>Loading expenses...</p>
+        </div>
+    }
+    else if (!pagedExpenses.Any())
+    {
+        <div class="empty-state">
+            <span class="empty-icon">🗂️</span>
+            <h3>No Expenses Found</h3>
+            <p>@(allExpenses.Count == 0 ? "There are no expenses recorded yet." : "No expenses match the current filters.")</p>
+        </div>
+    }
+    else
+    {
+        <div class="table-card">
+            <div class="table-wrapper">
+                <table class="expenses-table">
+                    <thead>
+                        <tr>
+                            <th class="col-num">#</th>
+                            <th class="col-title">Title</th>
+                            <th class="col-amount">Amount</th>
+                            <th class="col-category">Category</th>
+                            <th class="col-user">User</th>
+                            <th class="col-date">Date</th>
+                            <th class="col-actions">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @{ int rowStart = (currentPage - 1) * PageSize; }
+                        @foreach (var (expense, idx) in pagedExpenses.Select((e, i) => (e, i)))
+                        {
+                            <tr class="@(confirmDeleteId == expense.Id ? "row-confirm-active" : "")">
+                                <td class="col-num">
+                                    <span class="row-num">@(rowStart + idx + 1)</span>
+                                </td>
+                                <td class="col-title">
+                                    <div class="title-cell">
+                                        <span class="expense-title">@expense.Title</span>
+                                        @if (!string.IsNullOrWhiteSpace(expense.Notes))
+                                        {
+                                            <span class="notes-preview" title="@expense.Notes">📝</span>
+                                        }
+                                    </div>
+                                </td>
+                                <td class="col-amount">
+                                    <span class="amount-value">@expense.Amount.ToString("C")</span>
+                                </td>
+                                <td class="col-category">
+                                    @if (expense.CategoryId.HasValue && categoriesDict.TryGetValue(expense.CategoryId.Value, out var cat))
+                                    {
+                                        <span class="category-badge">
+                                            @if (!string.IsNullOrWhiteSpace(cat.Icon))
+                                            {
+                                                <span>@cat.Icon</span>
+                                            }
+                                            @cat.Name
+                                        </span>
+                                    }
+                                    else
+                                    {
+                                        <span class="category-badge category-none">Uncategorized</span>
+                                    }
+                                </td>
+                                <td class="col-user">
+                                    @if (usersDict.TryGetValue(expense.UserId, out var user))
+                                    {
+                                        <span class="user-email" title="@user.FullName">@user.Email</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="user-unknown">Unknown</span>
+                                    }
+                                </td>
+                                <td class="col-date">
+                                    <span class="date-value">@expense.Date.ToString("MMM dd, yyyy")</span>
+                                </td>
+                                <td class="col-actions">
+                                    @if (confirmDeleteId == expense.Id)
+                                    {
+                                        <!-- Inline confirmation row -->
+                                        <div class="confirm-inline">
+                                            <span class="confirm-text">Delete?</span>
+                                            <button class="btn-confirm-yes" @onclick="() => ConfirmDelete(expense.Id)">
+                                                ✓ Yes
+                                            </button>
+                                            <button class="btn-confirm-no" @onclick="CancelDelete">
+                                                ✕ No
+                                            </button>
+                                        </div>
+                                    }
+                                    else
+                                    {
+                                        <button class="btn-delete" @onclick="() => RequestDelete(expense.Id)" title="Delete expense">
+                                            🗑️ Delete
+                                        </button>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- ───────────────────── Pagination ──────────────────── -->
+            @if (totalPages > 1)
+            {
+                <div class="pagination-bar">
+                    <button class="page-btn"
+                            disabled="@(currentPage == 1)"
+                            @onclick="PreviousPage">
+                        ← Previous
+                    </button>
+
+                    <div class="page-info">
+                        <span class="page-current">Page @currentPage</span>
+                        <span class="page-sep">of</span>
+                        <span class="page-total">@totalPages</span>
+                        <span class="page-records">
+                            (@(Math.Min((currentPage - 1) * PageSize + 1, filteredExpenses.Count))–@(Math.Min(currentPage * PageSize, filteredExpenses.Count)) of @filteredExpenses.Count)
+                        </span>
+                    </div>
+
+                    <button class="page-btn"
+                            disabled="@(currentPage == totalPages)"
+                            @onclick="NextPage">
+                        Next →
+                    </button>
+                </div>
+            }
+            else
+            {
+                <div class="pagination-bar pagination-single">
+                    <span class="page-records-single">Showing @filteredExpenses.Count expense@(filteredExpenses.Count == 1 ? "" : "s")</span>
+                </div>
+            }
+        </div>
+    }
+
+</div>
+
+<!-- ═══════════════════════ Scoped Styles ═══════════════════════════ -->
+<style>
+
+    /* ── Layout ── */
+    .admin-expenses-container {
+        padding: 1.5rem 2rem;
+        max-width: 1400px;
+        margin: 0 auto;
+        font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    }
+
+    /* ── Page Header ── */
+    .page-header {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        flex-wrap: wrap;
+        gap: 1.25rem;
+        margin-bottom: 1.75rem;
+    }
+
+    .page-title {
+        font-size: 1.75rem;
+        font-weight: 700;
+        color: #1e293b;
+        margin: 0 0 0.25rem;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
+    .page-title-icon {
+        font-size: 1.5rem;
+    }
+
+    .page-subtitle {
+        font-size: 0.9rem;
+        color: #64748b;
+        margin: 0;
+    }
+
+    .summary-badges {
+        display: flex;
+        gap: 0.75rem;
+        flex-wrap: wrap;
+    }
+
+    .summary-badge {
+        background: #ffffff;
+        border: 1px solid #e2e8f0;
+        border-radius: 12px;
+        padding: 0.6rem 1rem;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        min-width: 110px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+    }
+
+    .summary-badge-accent {
+        background: linear-gradient(135deg, #4f46e5, #6366f1);
+        border-color: #4f46e5;
+        color: #fff;
+    }
+
+    .summary-badge-muted {
+        background: #f8fafc;
+    }
+
+    .badge-value {
+        font-size: 1.2rem;
+        font-weight: 700;
+        color: inherit;
+        line-height: 1.2;
+    }
+
+    .summary-badge-accent .badge-value {
+        color: #fff;
+    }
+
+    .badge-label {
+        font-size: 0.7rem;
+        color: #94a3b8;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        margin-top: 0.2rem;
+    }
+
+    .summary-badge-accent .badge-label {
+        color: rgba(255,255,255,0.75);
+    }
+
+    /* ── Filter Card ── */
+    .filter-card {
+        background: #ffffff;
+        border: 1px solid #e2e8f0;
+        border-radius: 14px;
+        padding: 1.25rem 1.5rem;
+        margin-bottom: 1.5rem;
+        box-shadow: 0 1px 4px rgba(0,0,0,0.05);
+    }
+
+    .filter-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+        gap: 1rem;
+        margin-bottom: 1rem;
+    }
+
+    .filter-group {
+        display: flex;
+        flex-direction: column;
+        gap: 0.35rem;
+    }
+
+    .filter-label {
+        font-size: 0.78rem;
+        font-weight: 600;
+        color: #475569;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+    }
+
+    .filter-input {
+        border: 1.5px solid #e2e8f0;
+        border-radius: 8px;
+        padding: 0.5rem 0.75rem;
+        font-size: 0.9rem;
+        color: #1e293b;
+        background: #f8fafc;
+        transition: border-color 0.2s, box-shadow 0.2s;
+        outline: none;
+        width: 100%;
+        box-sizing: border-box;
+    }
+
+    .filter-input:focus {
+        border-color: #6366f1;
+        box-shadow: 0 0 0 3px rgba(99,102,241,0.15);
+        background: #fff;
+    }
+
+    .filter-actions {
+        display: flex;
+        justify-content: flex-end;
+    }
+
+    .btn-clear {
+        background: #f1f5f9;
+        border: 1.5px solid #e2e8f0;
+        border-radius: 8px;
+        padding: 0.45rem 1.1rem;
+        font-size: 0.85rem;
+        font-weight: 600;
+        color: #64748b;
+        cursor: pointer;
+        transition: background 0.2s, color 0.2s, border-color 0.2s;
+    }
+
+    .btn-clear:hover {
+        background: #fee2e2;
+        border-color: #fca5a5;
+        color: #dc2626;
+    }
+
+    /* ── Loading / Empty ── */
+    .loading-state, .empty-state {
+        background: #fff;
+        border: 1px solid #e2e8f0;
+        border-radius: 14px;
+        padding: 3.5rem 2rem;
+        text-align: center;
+        color: #64748b;
+        box-shadow: 0 1px 4px rgba(0,0,0,0.05);
+    }
+
+    .spinner {
+        width: 40px;
+        height: 40px;
+        border: 4px solid #e2e8f0;
+        border-top-color: #6366f1;
+        border-radius: 50%;
+        animation: spin 0.7s linear infinite;
+        margin: 0 auto 1rem;
+    }
+
+    @@keyframes spin {
+        to { transform: rotate(360deg); }
+    }
+
+    .empty-icon {
+        font-size: 3rem;
+        display: block;
+        margin-bottom: 0.75rem;
+    }
+
+    .empty-state h3 {
+        font-size: 1.15rem;
+        font-weight: 600;
+        color: #334155;
+        margin: 0 0 0.5rem;
+    }
+
+    .empty-state p {
+        font-size: 0.9rem;
+        margin: 0;
+    }
+
+    /* ── Table Card ── */
+    .table-card {
+        background: #fff;
+        border: 1px solid #e2e8f0;
+        border-radius: 14px;
+        overflow: hidden;
+        box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+    }
+
+    .table-wrapper {
+        overflow-x: auto;
+    }
+
+    .expenses-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.9rem;
+    }
+
+    .expenses-table thead {
+        background: linear-gradient(to right, #f8fafc, #f1f5f9);
+        border-bottom: 2px solid #e2e8f0;
+    }
+
+    .expenses-table thead th {
+        padding: 0.85rem 1rem;
+        text-align: left;
+        font-size: 0.75rem;
+        font-weight: 700;
+        color: #475569;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        white-space: nowrap;
+    }
+
+    .expenses-table tbody tr {
+        border-bottom: 1px solid #f1f5f9;
+        transition: background 0.15s;
+    }
+
+    .expenses-table tbody tr:last-child {
+        border-bottom: none;
+    }
+
+    .expenses-table tbody tr:hover {
+        background: #fafbff;
+    }
+
+    .expenses-table tbody tr.row-confirm-active {
+        background: #fff7ed;
+        border-left: 3px solid #f97316;
+    }
+
+    .expenses-table tbody td {
+        padding: 0.85rem 1rem;
+        vertical-align: middle;
+        color: #334155;
+    }
+
+    /* ── Column widths ── */
+    .col-num     { width: 50px;  text-align: center; }
+    .col-title   { min-width: 160px; }
+    .col-amount  { width: 110px; text-align: right; }
+    .col-category{ width: 140px; }
+    .col-user    { min-width: 180px; }
+    .col-date    { width: 130px; white-space: nowrap; }
+    .col-actions { width: 160px; text-align: center; }
+
+    /* ── Cell content ── */
+    .row-num {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        background: #f1f5f9;
+        font-size: 0.78rem;
+        font-weight: 600;
+        color: #64748b;
+    }
+
+    .title-cell {
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+    }
+
+    .expense-title {
+        font-weight: 500;
+        color: #1e293b;
+    }
+
+    .notes-preview {
+        font-size: 0.8rem;
+        cursor: help;
+        opacity: 0.7;
+    }
+
+    .amount-value {
+        font-weight: 700;
+        color: #059669;
+        font-variant-numeric: tabular-nums;
+    }
+
+    .category-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.25rem;
+        background: #ede9fe;
+        color: #5b21b6;
+        border-radius: 20px;
+        padding: 0.2rem 0.65rem;
+        font-size: 0.8rem;
+        font-weight: 500;
+    }
+
+    .category-none {
+        background: #f1f5f9;
+        color: #94a3b8;
+    }
+
+    .user-email {
+        font-size: 0.83rem;
+        color: #3b82f6;
+        font-weight: 500;
+        cursor: default;
+        word-break: break-all;
+    }
+
+    .user-unknown {
+        font-size: 0.83rem;
+        color: #94a3b8;
+        font-style: italic;
+    }
+
+    .date-value {
+        font-size: 0.83rem;
+        color: #64748b;
+    }
+
+    /* ── Action buttons ── */
+    .btn-delete {
+        background: #fff;
+        border: 1.5px solid #fca5a5;
+        border-radius: 8px;
+        padding: 0.35rem 0.8rem;
+        font-size: 0.82rem;
+        font-weight: 600;
+        color: #ef4444;
+        cursor: pointer;
+        transition: background 0.2s, border-color 0.2s;
+    }
+
+    .btn-delete:hover {
+        background: #fee2e2;
+        border-color: #ef4444;
+    }
+
+    .confirm-inline {
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+        justify-content: center;
+        flex-wrap: wrap;
+    }
+
+    .confirm-text {
+        font-size: 0.8rem;
+        font-weight: 600;
+        color: #b45309;
+    }
+
+    .btn-confirm-yes {
+        background: #ef4444;
+        border: none;
+        border-radius: 7px;
+        padding: 0.3rem 0.65rem;
+        font-size: 0.8rem;
+        font-weight: 700;
+        color: #fff;
+        cursor: pointer;
+        transition: background 0.2s;
+    }
+
+    .btn-confirm-yes:hover {
+        background: #dc2626;
+    }
+
+    .btn-confirm-no {
+        background: #f1f5f9;
+        border: 1.5px solid #e2e8f0;
+        border-radius: 7px;
+        padding: 0.3rem 0.65rem;
+        font-size: 0.8rem;
+        font-weight: 700;
+        color: #64748b;
+        cursor: pointer;
+        transition: background 0.2s;
+    }
+
+    .btn-confirm-no:hover {
+        background: #e2e8f0;
+    }
+
+    /* ── Pagination ── */
+    .pagination-bar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0.9rem 1.25rem;
+        border-top: 1px solid #f1f5f9;
+        background: #fafbff;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+    }
+
+    .pagination-single {
+        justify-content: center;
+    }
+
+    .page-btn {
+        background: #fff;
+        border: 1.5px solid #e2e8f0;
+        border-radius: 8px;
+        padding: 0.45rem 1rem;
+        font-size: 0.85rem;
+        font-weight: 600;
+        color: #475569;
+        cursor: pointer;
+        transition: background 0.2s, border-color 0.2s, color 0.2s;
+    }
+
+    .page-btn:hover:not(:disabled) {
+        background: #ede9fe;
+        border-color: #a5b4fc;
+        color: #4f46e5;
+    }
+
+    .page-btn:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+    }
+
+    .page-info {
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+        font-size: 0.88rem;
+        color: #64748b;
+    }
+
+    .page-current {
+        font-weight: 700;
+        color: #4f46e5;
+    }
+
+    .page-sep {
+        color: #94a3b8;
+    }
+
+    .page-total {
+        font-weight: 600;
+        color: #334155;
+    }
+
+    .page-records, .page-records-single {
+        font-size: 0.8rem;
+        color: #94a3b8;
+        margin-left: 0.25rem;
+    }
+
+    /* ── Responsive tweaks ── */
+    @@media (max-width: 768px) {
+        .admin-expenses-container { padding: 1rem; }
+        .page-header { flex-direction: column; }
+        .summary-badges { justify-content: flex-start; }
+        .filter-grid { grid-template-columns: 1fr 1fr; }
+    }
+
+    @@media (max-width: 480px) {
+        .filter-grid { grid-template-columns: 1fr; }
+        .summary-badges { gap: 0.5rem; }
+    }
+
+</style>
+
+@code {
+
+    // ── Constants ──────────────────────────────────────────────────────
+    private const int PageSize = 15;
+
+    // ── State ──────────────────────────────────────────────────────────
+    private bool isLoading = true;
+
+    private List<Expense> allExpenses = new();
+    private List<Expense> filteredExpenses = new();
+    private List<Expense> pagedExpenses = new();
+
+    private Dictionary<int, Category> categoriesDict = new();
+    private Dictionary<string, ApplicationUser> usersDict = new();
+
+    // Filters
+    private string searchText = string.Empty;
+    private int selectedCategoryId = 0;   // 0 = all
+    private DateTime? fromDate;
+    private DateTime? toDate;
+
+    // Pagination
+    private int currentPage = 1;
+    private int totalPages = 1;
+
+    // Delete confirmation
+    private int? confirmDeleteId = null;
+
+    // ── Lifecycle ──────────────────────────────────────────────────────
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadDataAsync();
+    }
+
+    private async Task LoadDataAsync()
+    {
+        isLoading = true;
+
+        // Load all expenses (no tracking needed for display)
+        allExpenses = await Db.Expenses
+            .AsNoTracking()
+            .OrderByDescending(e => e.Date)
+            .ToListAsync();
+
+        // Load categories into dictionary
+        var categories = await Db.Categories.AsNoTracking().ToListAsync();
+        categoriesDict = categories.ToDictionary(c => c.Id);
+
+        // Load users into dictionary via UserManager
+        var users = await UserManager.Users.AsNoTracking().ToListAsync();
+        usersDict = users.ToDictionary(u => u.Id);
+
+        isLoading = false;
+
+        FilterExpenses();
+    }
+
+    // ── Filtering ──────────────────────────────────────────────────────
+    private void OnFilterChanged(ChangeEventArgs e)
+    {
+        searchText = e.Value?.ToString() ?? string.Empty;
+        FilterExpenses();
+    }
+
+    private void FilterExpenses()
+    {
+        var query = allExpenses.AsEnumerable();
+
+        // Title search
+        if (!string.IsNullOrWhiteSpace(searchText))
+        {
+            var term = searchText.Trim().ToLowerInvariant();
+            query = query.Where(e => e.Title.ToLowerInvariant().Contains(term));
+        }
+
+        // Category filter
+        if (selectedCategoryId != 0)
+        {
+            query = query.Where(e => e.CategoryId == selectedCategoryId);
+        }
+
+        // Date range
+        if (fromDate.HasValue)
+        {
+            query = query.Where(e => e.Date.Date >= fromDate.Value.Date);
+        }
+
+        if (toDate.HasValue)
+        {
+            query = query.Where(e => e.Date.Date <= toDate.Value.Date);
+        }
+
+        filteredExpenses = query.ToList();
+        currentPage = 1;
+        confirmDeleteId = null;
+
+        UpdatePaging();
+    }
+
+    private void ClearFilters()
+    {
+        searchText = string.Empty;
+        selectedCategoryId = 0;
+        fromDate = null;
+        toDate = null;
+        FilterExpenses();
+    }
+
+    // ── Pagination ─────────────────────────────────────────────────────
+    private void UpdatePaging()
+    {
+        totalPages = Math.Max(1, (int)Math.Ceiling(filteredExpenses.Count / (double)PageSize));
+        currentPage = Math.Clamp(currentPage, 1, totalPages);
+
+        pagedExpenses = filteredExpenses
+            .Skip((currentPage - 1) * PageSize)
+            .Take(PageSize)
+            .ToList();
+    }
+
+    private void PreviousPage()
+    {
+        if (currentPage > 1)
+        {
+            currentPage--;
+            confirmDeleteId = null;
+            UpdatePaging();
+        }
+    }
+
+    private void NextPage()
+    {
+        if (currentPage < totalPages)
+        {
+            currentPage++;
+            confirmDeleteId = null;
+            UpdatePaging();
+        }
+    }
+
+    // ── Delete ─────────────────────────────────────────────────────────
+    private void RequestDelete(int expenseId)
+    {
+        confirmDeleteId = expenseId;
+    }
+
+    private void CancelDelete()
+    {
+        confirmDeleteId = null;
+    }
+
+    private async Task ConfirmDelete(int expenseId)
+    {
+        var expense = await Db.Expenses.FindAsync(expenseId);
+        if (expense is not null)
+        {
+            Db.Expenses.Remove(expense);
+            await Db.SaveChangesAsync();
+        }
+
+        confirmDeleteId = null;
+
+        // Refresh in-memory list
+        allExpenses.RemoveAll(e => e.Id == expenseId);
+        FilterExpenses();
+    }
+}

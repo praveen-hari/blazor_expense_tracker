@@ -1,0 +1,738 @@
+@page "/admin"
+@rendermode InteractiveServer
+
+@using ExpenseTracker.Data
+@using ExpenseTracker.Models
+@using Microsoft.AspNetCore.Identity
+@using Microsoft.EntityFrameworkCore
+
+@inject ApplicationDbContext Db
+@inject UserManager<ApplicationUser> UserManager
+
+<PageTitle>Admin Dashboard</PageTitle>
+
+<div class="admin-dashboard">
+
+    <!-- ─── Header ─────────────────────────────────────────────── -->
+    <div class="dashboard-header">
+        <div class="header-content">
+            <div class="header-icon">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="28" height="28">
+                    <path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/>
+                </svg>
+            </div>
+            <div>
+                <h1 class="dashboard-title">Admin Dashboard</h1>
+                <p class="dashboard-subtitle">Platform overview &amp; analytics</p>
+            </div>
+        </div>
+        <div class="header-badge">
+            <span class="live-badge">
+                <span class="live-dot"></span>
+                Live Data
+            </span>
+        </div>
+    </div>
+
+    @if (isLoading)
+    {
+        <!-- ─── Loading State ──────────────────────────────────── -->
+        <div class="loading-container">
+            <div class="loading-spinner"></div>
+            <p class="loading-text">Loading dashboard data…</p>
+        </div>
+    }
+    else
+    {
+        <!-- ─── Stat Cards ─────────────────────────────────────── -->
+        <div class="stats-grid">
+
+            <!-- Total Users -->
+            <div class="stat-card stat-card--blue">
+                <div class="stat-card__body">
+                    <div class="stat-card__info">
+                        <p class="stat-card__label">Total Users</p>
+                        <h2 class="stat-card__value">@totalUsers</h2>
+                        <p class="stat-card__sub">Registered accounts</p>
+                    </div>
+                    <div class="stat-card__icon">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/>
+                        </svg>
+                    </div>
+                </div>
+                <div class="stat-card__footer stat-card__footer--blue"></div>
+            </div>
+
+            <!-- Total Expenses -->
+            <div class="stat-card stat-card--purple">
+                <div class="stat-card__body">
+                    <div class="stat-card__info">
+                        <p class="stat-card__label">Total Expenses</p>
+                        <h2 class="stat-card__value">@totalExpenses</h2>
+                        <p class="stat-card__sub">All recorded entries</p>
+                    </div>
+                    <div class="stat-card__icon">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M20 4H4c-1.11 0-2 .89-2 2v12c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V6c0-1.11-.89-2-2-2zm0 14H4v-6h16v6zm0-10H4V6h16v2z"/>
+                        </svg>
+                    </div>
+                </div>
+                <div class="stat-card__footer stat-card__footer--purple"></div>
+            </div>
+
+            <!-- Total Amount Spent -->
+            <div class="stat-card stat-card--indigo">
+                <div class="stat-card__body">
+                    <div class="stat-card__info">
+                        <p class="stat-card__label">Total Amount Spent</p>
+                        <h2 class="stat-card__value">@totalAmountSpent.ToString("C")</h2>
+                        <p class="stat-card__sub">Across all users</p>
+                    </div>
+                    <div class="stat-card__icon">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M11.8 10.9c-2.27-.59-3-1.2-3-2.15 0-1.09 1.01-1.85 2.7-1.85 1.78 0 2.44.85 2.5 2.1h2.21c-.07-1.72-1.12-3.3-3.21-3.81V3h-3v2.16c-1.94.42-3.5 1.68-3.5 3.61 0 2.31 1.91 3.46 4.7 4.13 2.5.6 3 1.48 3 2.41 0 .69-.49 1.79-2.7 1.79-2.06 0-2.87-.92-2.98-2.1h-2.2c.12 2.19 1.76 3.42 3.68 3.83V21h3v-2.15c1.95-.37 3.5-1.5 3.5-3.55 0-2.84-2.43-3.81-4.7-4.4z"/>
+                        </svg>
+                    </div>
+                </div>
+                <div class="stat-card__footer stat-card__footer--indigo"></div>
+            </div>
+
+            <!-- Total Categories -->
+            <div class="stat-card stat-card--violet">
+                <div class="stat-card__body">
+                    <div class="stat-card__info">
+                        <p class="stat-card__label">Total Categories</p>
+                        <h2 class="stat-card__value">@totalCategories</h2>
+                        <p class="stat-card__sub">Expense categories</p>
+                    </div>
+                    <div class="stat-card__icon">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M12 2l-5.5 9h11L12 2zm0 3.84L13.93 9h-3.87L12 5.84zM17.5 13c-2.49 0-4.5 2.01-4.5 4.5S15.01 22 17.5 22s4.5-2.01 4.5-4.5S19.99 13 17.5 13zm0 7c-1.38 0-2.5-1.12-2.5-2.5S16.12 15 17.5 15s2.5 1.12 2.5 2.5S18.88 20 17.5 20zM3 21.5h8v-8H3v8zm2-6h4v4H5v-4z"/>
+                        </svg>
+                    </div>
+                </div>
+                <div class="stat-card__footer stat-card__footer--violet"></div>
+            </div>
+
+        </div>
+
+        <!-- ─── Tables Row ─────────────────────────────────────── -->
+        <div class="tables-row">
+
+            <!-- Recent Expenses Table -->
+            <div class="table-card">
+                <div class="table-card__header">
+                    <div class="table-card__title-group">
+                        <span class="table-card__dot table-card__dot--blue"></span>
+                        <h2 class="table-card__title">Recent Expenses</h2>
+                    </div>
+                    <span class="table-card__badge">Last 10</span>
+                </div>
+
+                @if (recentExpenses.Count == 0)
+                {
+                    <div class="empty-state">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="40" height="40" style="opacity:.3;margin-bottom:.5rem;">
+                            <path d="M20 4H4c-1.11 0-2 .89-2 2v12c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V6c0-1.11-.89-2-2-2zm0 14H4v-6h16v6zm0-10H4V6h16v2z"/>
+                        </svg>
+                        <p>No expenses recorded yet.</p>
+                    </div>
+                }
+                else
+                {
+                    <div class="table-wrapper">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Title</th>
+                                    <th>Amount</th>
+                                    <th>User</th>
+                                    <th>Date</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var item in recentExpenses)
+                                {
+                                    <tr>
+                                        <td>
+                                            <span class="title-cell">@item.Title</span>
+                                        </td>
+                                        <td>
+                                            <span class="amount-badge">@item.Amount.ToString("C")</span>
+                                        </td>
+                                        <td>
+                                            <span class="user-cell">
+                                                <span class="user-avatar">@(item.UserEmail?.Length > 0 ? item.UserEmail[0].ToString().ToUpper() : "?")</span>
+                                                @item.UserEmail
+                                            </span>
+                                        </td>
+                                        <td>
+                                            <span class="date-cell">@item.Date.ToString("MMM dd, yyyy")</span>
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+            </div>
+
+            <!-- Top Spending Users Table -->
+            <div class="table-card">
+                <div class="table-card__header">
+                    <div class="table-card__title-group">
+                        <span class="table-card__dot table-card__dot--purple"></span>
+                        <h2 class="table-card__title">Top Spending Users</h2>
+                    </div>
+                    <span class="table-card__badge">Top 5</span>
+                </div>
+
+                @if (topSpendingUsers.Count == 0)
+                {
+                    <div class="empty-state">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="40" height="40" style="opacity:.3;margin-bottom:.5rem;">
+                            <path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/>
+                        </svg>
+                        <p>No spending data available.</p>
+                    </div>
+                }
+                else
+                {
+                    <div class="table-wrapper">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Rank</th>
+                                    <th>User Email</th>
+                                    <th>Total Spent</th>
+                                    <th>Expenses</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @{int rank = 1;}
+                                @foreach (var item in topSpendingUsers)
+                                {
+                                    <tr>
+                                        <td>
+                                            <span class="rank-badge rank-badge--@(rank <= 3 ? rank.ToString() : "default")">
+                                                @(rank == 1 ? "🥇" : rank == 2 ? "🥈" : rank == 3 ? "🥉" : $"#{rank}")
+                                            </span>
+                                        </td>
+                                        <td>
+                                            <span class="user-cell">
+                                                <span class="user-avatar user-avatar--alt">@(item.Email?.Length > 0 ? item.Email[0].ToString().ToUpper() : "?")</span>
+                                                @item.Email
+                                            </span>
+                                        </td>
+                                        <td>
+                                            <span class="amount-badge amount-badge--total">@item.TotalSpent.ToString("C")</span>
+                                        </td>
+                                        <td>
+                                            <span class="count-pill">@item.ExpenseCount</span>
+                                        </td>
+                                    </tr>
+                                    rank++;
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+            </div>
+
+        </div>
+    }
+
+</div>
+
+<!-- ─────────────────────────────────────────────────────────────── -->
+<!-- Scoped Styles                                                    -->
+<!-- ─────────────────────────────────────────────────────────────── -->
+<style>
+
+    /* ── Reset / Base ─────────────────────────────────────────── */
+    .admin-dashboard {
+        font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+        padding: 1.75rem;
+        background: #f0f2f8;
+        min-height: 100vh;
+        color: #1e2235;
+    }
+
+    /* ── Header ───────────────────────────────────────────────── */
+    .dashboard-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 2rem;
+        flex-wrap: wrap;
+        gap: 1rem;
+    }
+
+    .header-content {
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+    }
+
+    .header-icon {
+        width: 52px;
+        height: 52px;
+        border-radius: 14px;
+        background: linear-gradient(135deg, rgb(5, 39, 103) 0%, #3a0647 100%);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #fff;
+        box-shadow: 0 4px 15px rgba(58, 6, 71, 0.35);
+        flex-shrink: 0;
+    }
+
+    .dashboard-title {
+        font-size: 1.65rem;
+        font-weight: 700;
+        margin: 0 0 .2rem;
+        background: linear-gradient(135deg, rgb(5, 39, 103), #3a0647);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+        line-height: 1.2;
+    }
+
+    .dashboard-subtitle {
+        font-size: .85rem;
+        color: #6b7280;
+        margin: 0;
+    }
+
+    .live-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: .45rem;
+        background: #fff;
+        border: 1px solid #e2e8f0;
+        border-radius: 999px;
+        padding: .35rem .85rem;
+        font-size: .78rem;
+        font-weight: 600;
+        color: #374151;
+        box-shadow: 0 1px 4px rgba(0,0,0,.06);
+    }
+
+    .live-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #22c55e;
+        animation: pulse-dot 1.6s ease-in-out infinite;
+    }
+
+    @keyframes pulse-dot {
+        0%, 100% { opacity: 1; transform: scale(1); }
+        50%       { opacity: .55; transform: scale(1.3); }
+    }
+
+    /* ── Stat Cards Grid ──────────────────────────────────────── */
+    .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 1.25rem;
+        margin-bottom: 2rem;
+    }
+
+    .stat-card {
+        border-radius: 16px;
+        overflow: hidden;
+        box-shadow: 0 4px 20px rgba(0,0,0,.08);
+        transition: transform .2s ease, box-shadow .2s ease;
+        background: #fff;
+    }
+
+    .stat-card:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 8px 30px rgba(0,0,0,.13);
+    }
+
+    .stat-card__body {
+        padding: 1.4rem 1.5rem 1.2rem;
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 1rem;
+    }
+
+    .stat-card__label {
+        font-size: .78rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: .06em;
+        color: #6b7280;
+        margin: 0 0 .35rem;
+    }
+
+    .stat-card__value {
+        font-size: 1.9rem;
+        font-weight: 800;
+        margin: 0 0 .25rem;
+        line-height: 1;
+        color: #111827;
+    }
+
+    .stat-card__sub {
+        font-size: .78rem;
+        color: #9ca3af;
+        margin: 0;
+    }
+
+    .stat-card__icon {
+        width: 48px;
+        height: 48px;
+        border-radius: 12px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+    }
+
+    .stat-card__icon svg {
+        width: 24px;
+        height: 24px;
+    }
+
+    /* Per-card colour themes */
+    .stat-card--blue   .stat-card__value { color: #1a56db; }
+    .stat-card--purple .stat-card__value { color: #7e3af2; }
+    .stat-card--indigo .stat-card__value { color: #4338ca; }
+    .stat-card--violet .stat-card__value { color: #9333ea; }
+
+    .stat-card--blue   .stat-card__icon { background: #eff6ff; color: #1a56db; }
+    .stat-card--purple .stat-card__icon { background: #f5f3ff; color: #7e3af2; }
+    .stat-card--indigo .stat-card__icon { background: #eef2ff; color: #4338ca; }
+    .stat-card--violet .stat-card__icon { background: #faf5ff; color: #9333ea; }
+
+    .stat-card__footer {
+        height: 4px;
+    }
+
+    .stat-card__footer--blue   { background: linear-gradient(90deg, #1a56db, #60a5fa); }
+    .stat-card__footer--purple { background: linear-gradient(90deg, #7e3af2, #c084fc); }
+    .stat-card__footer--indigo { background: linear-gradient(90deg, #4338ca, #818cf8); }
+    .stat-card__footer--violet { background: linear-gradient(90deg, #9333ea, #d8b4fe); }
+
+    /* ── Tables Row ───────────────────────────────────────────── */
+    .tables-row {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+        gap: 1.25rem;
+    }
+
+    /* ── Table Card ───────────────────────────────────────────── */
+    .table-card {
+        background: #fff;
+        border-radius: 16px;
+        box-shadow: 0 4px 20px rgba(0,0,0,.08);
+        overflow: hidden;
+    }
+
+    .table-card__header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 1.2rem 1.5rem;
+        border-bottom: 1px solid #f3f4f6;
+        background: linear-gradient(135deg, rgb(5, 39, 103) 0%, #3a0647 100%);
+    }
+
+    .table-card__title-group {
+        display: flex;
+        align-items: center;
+        gap: .65rem;
+    }
+
+    .table-card__dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        flex-shrink: 0;
+    }
+
+    .table-card__dot--blue   { background: #60a5fa; }
+    .table-card__dot--purple { background: #c084fc; }
+
+    .table-card__title {
+        font-size: 1rem;
+        font-weight: 700;
+        margin: 0;
+        color: #fff;
+    }
+
+    .table-card__badge {
+        font-size: .72rem;
+        font-weight: 600;
+        color: rgba(255,255,255,.8);
+        background: rgba(255,255,255,.15);
+        border: 1px solid rgba(255,255,255,.2);
+        border-radius: 999px;
+        padding: .2rem .65rem;
+    }
+
+    /* ── Data Table ───────────────────────────────────────────── */
+    .table-wrapper {
+        overflow-x: auto;
+    }
+
+    .data-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: .875rem;
+    }
+
+    .data-table thead tr {
+        background: #f9fafb;
+    }
+
+    .data-table th {
+        padding: .75rem 1.25rem;
+        text-align: left;
+        font-size: .72rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: .06em;
+        color: #6b7280;
+        border-bottom: 1px solid #f3f4f6;
+        white-space: nowrap;
+    }
+
+    .data-table td {
+        padding: .85rem 1.25rem;
+        border-bottom: 1px solid #f9fafb;
+        color: #374151;
+        vertical-align: middle;
+    }
+
+    .data-table tbody tr:last-child td {
+        border-bottom: none;
+    }
+
+    .data-table tbody tr:hover {
+        background: #fafbff;
+    }
+
+    /* ── Cell Helpers ─────────────────────────────────────────── */
+    .title-cell {
+        font-weight: 600;
+        color: #111827;
+        max-width: 160px;
+        display: inline-block;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        vertical-align: middle;
+    }
+
+    .amount-badge {
+        display: inline-block;
+        background: #ecfdf5;
+        color: #059669;
+        font-weight: 700;
+        font-size: .82rem;
+        padding: .2rem .6rem;
+        border-radius: 8px;
+        white-space: nowrap;
+    }
+
+    .amount-badge--total {
+        background: #f5f3ff;
+        color: #7e3af2;
+    }
+
+    .user-cell {
+        display: inline-flex;
+        align-items: center;
+        gap: .55rem;
+        max-width: 200px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        vertical-align: middle;
+    }
+
+    .user-avatar {
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        background: linear-gradient(135deg, #1a56db, #7e3af2);
+        color: #fff;
+        font-size: .72rem;
+        font-weight: 700;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+        text-transform: uppercase;
+    }
+
+    .user-avatar--alt {
+        background: linear-gradient(135deg, #7e3af2, #9333ea);
+    }
+
+    .date-cell {
+        color: #6b7280;
+        font-size: .82rem;
+        white-space: nowrap;
+    }
+
+    .count-pill {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 28px;
+        height: 24px;
+        background: #eff6ff;
+        color: #1a56db;
+        font-size: .78rem;
+        font-weight: 700;
+        border-radius: 999px;
+        padding: 0 .5rem;
+    }
+
+    .rank-badge {
+        font-size: .9rem;
+        font-weight: 700;
+    }
+
+    /* ── Empty State ──────────────────────────────────────────── */
+    .empty-state {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 3rem 1rem;
+        color: #9ca3af;
+        font-size: .9rem;
+        text-align: center;
+    }
+
+    .empty-state p {
+        margin: 0;
+    }
+
+    /* ── Loading ──────────────────────────────────────────────── */
+    .loading-container {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        min-height: 300px;
+        gap: 1rem;
+    }
+
+    .loading-spinner {
+        width: 44px;
+        height: 44px;
+        border: 4px solid #e5e7eb;
+        border-top-color: #3a0647;
+        border-radius: 50%;
+        animation: spin .8s linear infinite;
+    }
+
+    @keyframes spin {
+        to { transform: rotate(360deg); }
+    }
+
+    .loading-text {
+        color: #6b7280;
+        font-size: .9rem;
+        margin: 0;
+    }
+
+    /* ── Responsive ───────────────────────────────────────────── */
+    @media (max-width: 640px) {
+        .admin-dashboard   { padding: 1rem; }
+        .dashboard-title   { font-size: 1.3rem; }
+        .stat-card__value  { font-size: 1.5rem; }
+        .tables-row        { grid-template-columns: 1fr; }
+    }
+
+</style>
+
+@code {
+
+    /* ── View-model types ─────────────────────────────────────── */
+
+    private sealed class RecentExpenseRow
+    {
+        public string  Title     { get; init; } = string.Empty;
+        public decimal Amount    { get; init; }
+        public string? UserEmail { get; init; }
+        public DateTime Date     { get; init; }
+    }
+
+    private sealed class TopSpenderRow
+    {
+        public string?  Email         { get; init; }
+        public decimal  TotalSpent    { get; init; }
+        public int      ExpenseCount  { get; init; }
+    }
+
+    /* ── State ────────────────────────────────────────────────── */
+
+    private bool isLoading = true;
+
+    private int     totalUsers        = 0;
+    private int     totalExpenses     = 0;
+    private decimal totalAmountSpent  = 0m;
+    private int     totalCategories   = 0;
+
+    private List<RecentExpenseRow> recentExpenses    = new();
+    private List<TopSpenderRow>    topSpendingUsers  = new();
+
+    /* ── Lifecycle ────────────────────────────────────────────── */
+
+    protected override async Task OnInitializedAsync()
+    {
+        // ── Scalar aggregates ────────────────────────────────────
+        totalUsers       = await UserManager.Users.CountAsync();
+        totalExpenses    = await Db.Expenses.CountAsync();
+        totalAmountSpent = await Db.Expenses.SumAsync(e => (decimal?)e.Amount) ?? 0m;
+        totalCategories  = await Db.Categories.CountAsync();
+
+        // ── Load raw data for joins (in-memory) ──────────────────
+        var expenses = await Db.Expenses
+            .OrderByDescending(e => e.Date)
+            .ToListAsync();
+
+        var users = await UserManager.Users
+            .Select(u => new { u.Id, u.Email })
+            .ToListAsync();
+
+        var userLookup = users.ToDictionary(u => u.Id, u => u.Email);
+
+        // ── Recent Expenses (last 10) ─────────────────────────────
+        recentExpenses = expenses
+            .Take(10)
+            .Select(e => new RecentExpenseRow
+            {
+                Title     = e.Title,
+                Amount    = e.Amount,
+                UserEmail = userLookup.TryGetValue(e.UserId, out var email) ? email : "Unknown",
+                Date      = e.Date
+            })
+            .ToList();
+
+        // ── Top Spending Users (top 5) ────────────────────────────
+        topSpendingUsers = expenses
+            .GroupBy(e => e.UserId)
+            .Select(g => new TopSpenderRow
+            {
+                Email        = userLookup.TryGetValue(g.Key, out var email) ? email : "Unknown",
+                TotalSpent   = g.Sum(e => e.Amount),
+                ExpenseCount = g.Count()
+            })
+            .OrderByDescending(r => r.TotalSpent)
+            .Take(5)
+            .ToList();
+
+        isLoading = false;
+    }
+}
