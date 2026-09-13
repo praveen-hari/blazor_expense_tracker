@@ -1,0 +1,4 @@
+/* Base reset — component styling lives in App.css */
+html {
+  color-scheme: dark;
+}
