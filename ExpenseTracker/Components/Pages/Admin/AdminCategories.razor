@@ -1,0 +1,876 @@
+@page "/admin/categories"
+@rendermode InteractiveServer
+
+@using ExpenseTracker.Data
+@using ExpenseTracker.Models
+@using Microsoft.EntityFrameworkCore
+
+@inject ApplicationDbContext Db
+
+<PageTitle>Admin - Categories</PageTitle>
+
+<div class="admin-categories-wrapper">
+
+    <!-- ═══════════════════════════════════════════
+         PAGE HEADER
+    ═══════════════════════════════════════════ -->
+    <div class="page-header mb-4">
+        <div class="d-flex align-items-center gap-3">
+            <div class="header-icon">
+                <span>🗂️</span>
+            </div>
+            <div>
+                <h1 class="page-title mb-0">Categories Management</h1>
+                <p class="page-subtitle mb-0">Add, edit, and remove expense categories</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════
+         ADD CATEGORY FORM
+    ═══════════════════════════════════════════ -->
+    <div class="card add-card mb-4">
+        <div class="card-header add-card-header">
+            <span class="card-header-icon">➕</span>
+            <span class="card-header-title">Add New Category</span>
+        </div>
+        <div class="card-body">
+            <div class="row g-3 align-items-end">
+
+                <!-- Name -->
+                <div class="col-12 col-md-5">
+                    <label class="form-label fw-semibold" for="newCatName">
+                        Category Name <span class="text-danger">*</span>
+                    </label>
+                    <input id="newCatName"
+                           type="text"
+                           class="form-control @(showAddError && string.IsNullOrWhiteSpace(newName) ? "is-invalid" : "")"
+                           placeholder="e.g. Groceries"
+                           maxlength="100"
+                           @bind="newName"
+                           @bind:event="oninput" />
+                    @if (showAddError && string.IsNullOrWhiteSpace(newName))
+                    {
+                        <div class="invalid-feedback">Category name is required.</div>
+                    }
+                </div>
+
+                <!-- Icon -->
+                <div class="col-12 col-md-4">
+                    <label class="form-label fw-semibold" for="newCatIcon">
+                        Icon <span class="text-muted fw-normal">(optional)</span>
+                    </label>
+                    <input id="newCatIcon"
+                           type="text"
+                           class="form-control"
+                           placeholder="e.g. 🍔 or bi-cart"
+                           maxlength="100"
+                           @bind="newIcon"
+                           @bind:event="oninput" />
+                </div>
+
+                <!-- Submit -->
+                <div class="col-12 col-md-3">
+                    <button class="btn btn-add w-100" @onclick="AddCategoryAsync" disabled="@isSaving">
+                        @if (isSaving)
+                        {
+                            <span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+                            <span>Saving…</span>
+                        }
+                        else
+                        {
+                            <span class="btn-icon">✅</span>
+                            <span>Add Category</span>
+                        }
+                    </button>
+                </div>
+
+            </div>
+
+            <!-- Global add-error banner (duplicate name, DB error, etc.) -->
+            @if (!string.IsNullOrEmpty(addErrorMessage))
+            {
+                <div class="alert alert-danger mt-3 mb-0 d-flex align-items-center gap-2">
+                    <span>⚠️</span>
+                    <span>@addErrorMessage</span>
+                </div>
+            }
+
+            @if (addSuccessMessage)
+            {
+                <div class="alert alert-success mt-3 mb-0 d-flex align-items-center gap-2">
+                    <span>✅</span>
+                    <span>Category added successfully!</span>
+                </div>
+            }
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════
+         CATEGORIES TABLE
+    ═══════════════════════════════════════════ -->
+    <div class="card table-card">
+        <div class="card-header table-card-header">
+            <div class="d-flex align-items-center justify-content-between">
+                <div class="d-flex align-items-center gap-2">
+                    <span class="card-header-icon">📋</span>
+                    <span class="card-header-title">All Categories</span>
+                </div>
+                <span class="badge badge-count">@categories.Count @(categories.Count == 1 ? "category" : "categories")</span>
+            </div>
+        </div>
+
+        <div class="card-body p-0">
+            @if (isLoading)
+            {
+                <div class="loading-state">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading…</span>
+                    </div>
+                    <p class="mt-3 text-muted">Loading categories…</p>
+                </div>
+            }
+            else if (categories.Count == 0)
+            {
+                <div class="empty-state">
+                    <div class="empty-icon">🗂️</div>
+                    <h5 class="empty-title">No Categories Yet</h5>
+                    <p class="empty-subtitle">Use the form above to add your first category.</p>
+                </div>
+            }
+            else
+            {
+                <div class="table-responsive">
+                    <table class="table categories-table mb-0">
+                        <thead>
+                            <tr>
+                                <th class="col-icon">Icon</th>
+                                <th class="col-name">Name</th>
+                                <th class="col-count">Expenses</th>
+                                <th class="col-actions">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var cat in categories)
+                            {
+                                <tr class="@(editingId == cat.Id ? "row-editing" : "") @(deleteConfirmId == cat.Id ? "row-deleting" : "")">
+
+                                    <!-- ── ICON CELL ── -->
+                                    <td class="col-icon">
+                                        @if (editingId == cat.Id)
+                                        {
+                                            <input type="text"
+                                                   class="form-control form-control-sm edit-icon-input"
+                                                   placeholder="🍔"
+                                                   maxlength="100"
+                                                   @bind="editIcon"
+                                                   @bind:event="oninput" />
+                                        }
+                                        else
+                                        {
+                                            <span class="category-icon">
+                                                @(string.IsNullOrWhiteSpace(cat.Icon) ? "🏷️" : cat.Icon)
+                                            </span>
+                                        }
+                                    </td>
+
+                                    <!-- ── NAME CELL ── -->
+                                    <td class="col-name">
+                                        @if (editingId == cat.Id)
+                                        {
+                                            <div>
+                                                <input type="text"
+                                                       class="form-control form-control-sm @(showEditError && string.IsNullOrWhiteSpace(editName) ? "is-invalid" : "")"
+                                                       placeholder="Category name"
+                                                       maxlength="100"
+                                                       @bind="editName"
+                                                       @bind:event="oninput" />
+                                                @if (showEditError && string.IsNullOrWhiteSpace(editName))
+                                                {
+                                                    <div class="invalid-feedback">Name cannot be empty.</div>
+                                                }
+                                            </div>
+                                        }
+                                        else
+                                        {
+                                            <span class="category-name">@cat.Name</span>
+                                        }
+                                    </td>
+
+                                    <!-- ── EXPENSE COUNT CELL ── -->
+                                    <td class="col-count">
+                                        @{
+                                            var count = expenseCounts.ContainsKey(cat.Id) ? expenseCounts[cat.Id] : 0;
+                                        }
+                                        <span class="expense-badge @(count > 0 ? "badge-has-expenses" : "badge-no-expenses")">
+                                            @count @(count == 1 ? "expense" : "expenses")
+                                        </span>
+                                    </td>
+
+                                    <!-- ── ACTIONS CELL ── -->
+                                    <td class="col-actions">
+
+                                        @if (editingId == cat.Id)
+                                        {
+                                            <!-- ── INLINE EDIT ACTIONS ── -->
+                                            <div class="action-group">
+                                                <button class="btn btn-save btn-sm"
+                                                        @onclick="() => SaveEditAsync(cat.Id)"
+                                                        disabled="@isSaving">
+                                                    @if (isSaving)
+                                                    {
+                                                        <span class="spinner-border spinner-border-sm" role="status"></span>
+                                                    }
+                                                    else
+                                                    {
+                                                        <span>💾 Save</span>
+                                                    }
+                                                </button>
+                                                <button class="btn btn-cancel btn-sm"
+                                                        @onclick="CancelEdit"
+                                                        disabled="@isSaving">
+                                                    ✖ Cancel
+                                                </button>
+                                            </div>
+
+                                            @if (!string.IsNullOrEmpty(editErrorMessage))
+                                            {
+                                                <div class="row-error-msg mt-1">⚠️ @editErrorMessage</div>
+                                            }
+                                        }
+                                        else if (deleteConfirmId == cat.Id)
+                                        {
+                                            <!-- ── DELETE CONFIRMATION ── -->
+                                            <div class="delete-confirm-group">
+                                                <span class="confirm-label">Delete «@cat.Name»?</span>
+                                                <div class="action-group mt-1">
+                                                    <button class="btn btn-confirm-delete btn-sm"
+                                                            @onclick="() => ConfirmDeleteAsync(cat.Id)"
+                                                            disabled="@isSaving">
+                                                        @if (isSaving)
+                                                        {
+                                                            <span class="spinner-border spinner-border-sm" role="status"></span>
+                                                        }
+                                                        else
+                                                        {
+                                                            <span>🗑️ Yes, Delete</span>
+                                                        }
+                                                    </button>
+                                                    <button class="btn btn-cancel btn-sm"
+                                                            @onclick="CancelDelete"
+                                                            disabled="@isSaving">
+                                                        ✖ Cancel
+                                                    </button>
+                                                </div>
+                                            </div>
+
+                                            @if (!string.IsNullOrEmpty(deleteErrorMessage))
+                                            {
+                                                <div class="row-error-msg mt-1">⚠️ @deleteErrorMessage</div>
+                                            }
+                                        }
+                                        else
+                                        {
+                                            <!-- ── NORMAL ACTIONS ── -->
+                                            <div class="action-group">
+                                                <button class="btn btn-edit btn-sm"
+                                                        @onclick="() => StartEdit(cat)"
+                                                        title="Edit this category">
+                                                    ✏️ Edit
+                                                </button>
+                                                <button class="btn btn-delete btn-sm"
+                                                        @onclick="() => StartDelete(cat.Id)"
+                                                        title="Delete this category">
+                                                    🗑️ Delete
+                                                </button>
+                                            </div>
+                                        }
+
+                                    </td>
+
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+    </div>
+
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     CODE BLOCK
+═══════════════════════════════════════════════════════════════════ -->
+@code {
+
+    // ── State ───────────────────────────────────────────────────────
+    private List<Category> categories = new();
+    private Dictionary<int, int> expenseCounts = new();
+
+    private bool isLoading = true;
+    private bool isSaving = false;
+
+    // ── Add form ────────────────────────────────────────────────────
+    private string newName = string.Empty;
+    private string newIcon = string.Empty;
+    private bool showAddError = false;
+    private string addErrorMessage = string.Empty;
+    private bool addSuccessMessage = false;
+
+    // ── Edit state ──────────────────────────────────────────────────
+    private int editingId = 0;          // 0 = no row being edited
+    private string editName = string.Empty;
+    private string editIcon = string.Empty;
+    private bool showEditError = false;
+    private string editErrorMessage = string.Empty;
+
+    // ── Delete state ────────────────────────────────────────────────
+    private int deleteConfirmId = 0;    // 0 = no row pending confirmation
+    private string deleteErrorMessage = string.Empty;
+
+    // ── Lifecycle ───────────────────────────────────────────────────
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadDataAsync();
+        isLoading = false;
+    }
+
+    private async Task LoadDataAsync()
+    {
+        categories = await Db.Categories
+            .OrderBy(c => c.Name)
+            .ToListAsync();
+
+        expenseCounts = await Db.Expenses
+            .Where(e => e.CategoryId.HasValue)
+            .GroupBy(e => e.CategoryId!.Value)
+            .Select(g => new { CategoryId = g.Key, Count = g.Count() })
+            .ToDictionaryAsync(x => x.CategoryId, x => x.Count);
+    }
+
+    // ── Add ─────────────────────────────────────────────────────────
+    private async Task AddCategoryAsync()
+    {
+        // Reset feedback
+        showAddError = false;
+        addErrorMessage = string.Empty;
+        addSuccessMessage = false;
+
+        // Validate
+        if (string.IsNullOrWhiteSpace(newName))
+        {
+            showAddError = true;
+            return;
+        }
+
+        isSaving = true;
+        StateHasChanged();
+
+        try
+        {
+            var category = new Category
+            {
+                Name = newName.Trim(),
+                Icon = string.IsNullOrWhiteSpace(newIcon) ? null : newIcon.Trim()
+            };
+
+            Db.Categories.Add(category);
+            await Db.SaveChangesAsync();
+
+            // Clear form
+            newName = string.Empty;
+            newIcon = string.Empty;
+            addSuccessMessage = true;
+
+            // Reload data
+            await LoadDataAsync();
+
+            // Auto-hide success after 3 seconds
+            _ = Task.Delay(3000).ContinueWith(_ =>
+            {
+                addSuccessMessage = false;
+                InvokeAsync(StateHasChanged);
+            });
+        }
+        catch (Exception ex)
+        {
+            addErrorMessage = $"Failed to add category: {ex.Message}";
+        }
+        finally
+        {
+            isSaving = false;
+            StateHasChanged();
+        }
+    }
+
+    // ── Edit ─────────────────────────────────────────────────────────
+    private void StartEdit(Category cat)
+    {
+        // Cancel any pending delete confirmation first
+        deleteConfirmId = 0;
+        deleteErrorMessage = string.Empty;
+
+        editingId = cat.Id;
+        editName = cat.Name;
+        editIcon = cat.Icon ?? string.Empty;
+        showEditError = false;
+        editErrorMessage = string.Empty;
+    }
+
+    private void CancelEdit()
+    {
+        editingId = 0;
+        editName = string.Empty;
+        editIcon = string.Empty;
+        showEditError = false;
+        editErrorMessage = string.Empty;
+    }
+
+    private async Task SaveEditAsync(int categoryId)
+    {
+        showEditError = false;
+        editErrorMessage = string.Empty;
+
+        if (string.IsNullOrWhiteSpace(editName))
+        {
+            showEditError = true;
+            return;
+        }
+
+        isSaving = true;
+        StateHasChanged();
+
+        try
+        {
+            var category = await Db.Categories.FindAsync(categoryId);
+            if (category is null)
+            {
+                editErrorMessage = "Category not found. It may have been deleted.";
+                return;
+            }
+
+            category.Name = editName.Trim();
+            category.Icon = string.IsNullOrWhiteSpace(editIcon) ? null : editIcon.Trim();
+
+            await Db.SaveChangesAsync();
+
+            // Exit edit mode and reload
+            editingId = 0;
+            await LoadDataAsync();
+        }
+        catch (Exception ex)
+        {
+            editErrorMessage = $"Failed to save: {ex.Message}";
+        }
+        finally
+        {
+            isSaving = false;
+            StateHasChanged();
+        }
+    }
+
+    // ── Delete ───────────────────────────────────────────────────────
+    private void StartDelete(int categoryId)
+    {
+        // Cancel any active edit first
+        editingId = 0;
+        editErrorMessage = string.Empty;
+
+        deleteConfirmId = categoryId;
+        deleteErrorMessage = string.Empty;
+    }
+
+    private void CancelDelete()
+    {
+        deleteConfirmId = 0;
+        deleteErrorMessage = string.Empty;
+    }
+
+    private async Task ConfirmDeleteAsync(int categoryId)
+    {
+        deleteErrorMessage = string.Empty;
+
+        // Re-check expense count at delete time (defensive)
+        var count = expenseCounts.ContainsKey(categoryId) ? expenseCounts[categoryId] : 0;
+        if (count > 0)
+        {
+            deleteErrorMessage = $"Cannot delete: category has {count} {(count == 1 ? "expense" : "expenses")}";
+            StateHasChanged();
+            return;
+        }
+
+        isSaving = true;
+        StateHasChanged();
+
+        try
+        {
+            var category = await Db.Categories.FindAsync(categoryId);
+            if (category is not null)
+            {
+                Db.Categories.Remove(category);
+                await Db.SaveChangesAsync();
+            }
+
+            deleteConfirmId = 0;
+            await LoadDataAsync();
+        }
+        catch (Exception ex)
+        {
+            deleteErrorMessage = $"Failed to delete: {ex.Message}";
+        }
+        finally
+        {
+            isSaving = false;
+            StateHasChanged();
+        }
+    }
+}
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     SCOPED STYLES
+═══════════════════════════════════════════════════════════════════ -->
+<style>
+
+    /* ── Wrapper ───────────────────────────────────────── */
+    .admin-categories-wrapper {
+        max-width: 960px;
+        margin: 0 auto;
+        padding: 1.5rem 1rem 3rem;
+    }
+
+    /* ── Page header ───────────────────────────────────── */
+    .page-header {
+        border-bottom: 2px solid #e9ecef;
+        padding-bottom: 1rem;
+    }
+
+    .header-icon {
+        width: 52px;
+        height: 52px;
+        background: linear-gradient(135deg, #e8f5e9, #c8e6c9);
+        border-radius: 14px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.6rem;
+        flex-shrink: 0;
+        box-shadow: 0 2px 6px rgba(76,175,80,.2);
+    }
+
+    .page-title {
+        font-size: 1.55rem;
+        font-weight: 700;
+        color: #1a1a2e;
+    }
+
+    .page-subtitle {
+        font-size: 0.9rem;
+        color: #6c757d;
+    }
+
+    /* ── Cards ─────────────────────────────────────────── */
+    .card {
+        border: none;
+        border-radius: 14px;
+        box-shadow: 0 2px 12px rgba(0,0,0,.07);
+        overflow: hidden;
+    }
+
+    .add-card-header,
+    .table-card-header {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        background: linear-gradient(90deg, #f8f9fa, #ffffff);
+        border-bottom: 1px solid #e9ecef;
+        padding: 0.85rem 1.25rem;
+        font-weight: 600;
+        color: #343a40;
+    }
+
+    .card-header-icon {
+        font-size: 1.1rem;
+    }
+
+    .card-header-title {
+        font-size: 1rem;
+        font-weight: 600;
+    }
+
+    /* ── Add button ────────────────────────────────────── */
+    .btn-add {
+        background: linear-gradient(135deg, #28a745, #20c997);
+        color: #fff;
+        border: none;
+        border-radius: 8px;
+        padding: 0.5rem 1.1rem;
+        font-weight: 600;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.4rem;
+        transition: opacity .2s, transform .1s;
+    }
+
+    .btn-add:hover:not(:disabled) {
+        opacity: .9;
+        transform: translateY(-1px);
+    }
+
+    .btn-add:disabled {
+        opacity: .65;
+        cursor: not-allowed;
+    }
+
+    .btn-icon {
+        font-size: 1rem;
+    }
+
+    /* ── Table ──────────────────────────────────────────── */
+    .categories-table {
+        border-collapse: separate;
+        border-spacing: 0;
+        width: 100%;
+    }
+
+    .categories-table thead tr th {
+        background: #f8f9fa;
+        color: #495057;
+        font-size: 0.8rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: .05em;
+        padding: 0.8rem 1rem;
+        border-bottom: 2px solid #dee2e6;
+        white-space: nowrap;
+    }
+
+    .categories-table tbody tr {
+        transition: background .15s;
+    }
+
+    .categories-table tbody tr:hover {
+        background: #f8fff9;
+    }
+
+    .categories-table tbody tr td {
+        padding: 0.8rem 1rem;
+        border-bottom: 1px solid #f0f0f0;
+        vertical-align: middle;
+    }
+
+    .categories-table tbody tr:last-child td {
+        border-bottom: none;
+    }
+
+    /* Row states */
+    .row-editing {
+        background: #fffde7 !important;
+        box-shadow: inset 3px 0 0 #ffc107;
+    }
+
+    .row-deleting {
+        background: #fff5f5 !important;
+        box-shadow: inset 3px 0 0 #dc3545;
+    }
+
+    /* ── Column widths ──────────────────────────────────── */
+    .col-icon    { width: 80px;  text-align: center; }
+    .col-name    { width: auto; }
+    .col-count   { width: 130px; text-align: center; }
+    .col-actions { width: 220px; }
+
+    /* ── Category display ───────────────────────────────── */
+    .category-icon {
+        font-size: 1.4rem;
+        line-height: 1;
+    }
+
+    .category-name {
+        font-weight: 500;
+        color: #212529;
+    }
+
+    /* ── Expense badge ──────────────────────────────────── */
+    .expense-badge {
+        display: inline-block;
+        padding: 0.25em 0.65em;
+        border-radius: 20px;
+        font-size: 0.78rem;
+        font-weight: 600;
+    }
+
+    .badge-has-expenses {
+        background: #cce5ff;
+        color: #004085;
+    }
+
+    .badge-no-expenses {
+        background: #e9ecef;
+        color: #6c757d;
+    }
+
+    /* ── Count badge (header) ───────────────────────────── */
+    .badge-count {
+        background: linear-gradient(135deg, #28a745, #20c997);
+        color: #fff;
+        font-size: 0.75rem;
+        padding: 0.3em 0.75em;
+        border-radius: 20px;
+        font-weight: 600;
+    }
+
+    /* ── Action buttons ─────────────────────────────────── */
+    .action-group {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.4rem;
+        align-items: center;
+    }
+
+    .btn-edit {
+        background: linear-gradient(135deg, #0d6efd, #0a58ca);
+        color: #fff;
+        border: none;
+        border-radius: 7px;
+        padding: 0.3rem 0.75rem;
+        font-size: 0.82rem;
+        font-weight: 600;
+        transition: opacity .2s, transform .1s;
+    }
+
+    .btn-edit:hover {
+        opacity: .88;
+        transform: translateY(-1px);
+        color: #fff;
+    }
+
+    .btn-delete {
+        background: linear-gradient(135deg, #dc3545, #b02a37);
+        color: #fff;
+        border: none;
+        border-radius: 7px;
+        padding: 0.3rem 0.75rem;
+        font-size: 0.82rem;
+        font-weight: 600;
+        transition: opacity .2s, transform .1s;
+    }
+
+    .btn-delete:hover {
+        opacity: .88;
+        transform: translateY(-1px);
+        color: #fff;
+    }
+
+    .btn-save {
+        background: linear-gradient(135deg, #28a745, #20c997);
+        color: #fff;
+        border: none;
+        border-radius: 7px;
+        padding: 0.3rem 0.75rem;
+        font-size: 0.82rem;
+        font-weight: 600;
+        transition: opacity .2s;
+    }
+
+    .btn-save:hover:not(:disabled) {
+        opacity: .88;
+        color: #fff;
+    }
+
+    .btn-save:disabled {
+        opacity: .65;
+    }
+
+    .btn-cancel {
+        background: #e9ecef;
+        color: #495057;
+        border: none;
+        border-radius: 7px;
+        padding: 0.3rem 0.75rem;
+        font-size: 0.82rem;
+        font-weight: 600;
+        transition: background .15s;
+    }
+
+    .btn-cancel:hover:not(:disabled) {
+        background: #dee2e6;
+    }
+
+    .btn-confirm-delete {
+        background: linear-gradient(135deg, #dc3545, #b02a37);
+        color: #fff;
+        border: none;
+        border-radius: 7px;
+        padding: 0.3rem 0.75rem;
+        font-size: 0.82rem;
+        font-weight: 600;
+        transition: opacity .2s;
+    }
+
+    .btn-confirm-delete:hover:not(:disabled) {
+        opacity: .88;
+        color: #fff;
+    }
+
+    .btn-confirm-delete:disabled {
+        opacity: .65;
+    }
+
+    /* ── Inline edit inputs ─────────────────────────────── */
+    .edit-icon-input {
+        max-width: 90px;
+        text-align: center;
+        font-size: 1.1rem;
+    }
+
+    /* ── Delete confirmation ────────────────────────────── */
+    .delete-confirm-group .confirm-label {
+        font-size: 0.82rem;
+        font-weight: 600;
+        color: #842029;
+    }
+
+    /* ── Row-level error messages ───────────────────────── */
+    .row-error-msg {
+        font-size: 0.78rem;
+        color: #dc3545;
+        font-weight: 500;
+    }
+
+    /* ── Empty / loading states ─────────────────────────── */
+    .loading-state,
+    .empty-state {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 3.5rem 1.5rem;
+        text-align: center;
+    }
+
+    .empty-icon {
+        font-size: 3rem;
+        margin-bottom: 0.75rem;
+        opacity: .6;
+    }
+
+    .empty-title {
+        font-weight: 700;
+        color: #343a40;
+        margin-bottom: 0.25rem;
+    }
+
+    .empty-subtitle {
+        color: #6c757d;
+        font-size: 0.9rem;
+    }
+
+    /* ── Responsive tweaks ──────────────────────────────── */
+    @@media (max-width: 576px) {
+        .col-count   { display: none; }
+        .col-actions { width: auto; }
+    }
+
+</style>
